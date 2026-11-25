@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 const ROOM_RE = /^[A-Za-z0-9-]{3,32}$/;
-const SUPPORTED_RE = /^https:\/\/((www\.|m\.)?youtube\.com|www\.netflix\.com|tv\.apple\.com)\//;
+const SUPPORTED_RE = /^https:\/\/((www\.|m\.)?youtube\.com|www\.netflix\.com|tv\.apple\.com|shahid\.mbc\.net)\//;
 
 const WORDS_A = ["nile", "spree", "popcorn", "couch", "snack", "remote", "blanket", "koshary", "pretzel"];
 const WORDS_B = ["party", "night", "club", "date", "gang", "crew"];
@@ -68,7 +68,7 @@ async function render() {
     const tab = await activeTab();
     const onVideoSite = Boolean(tab && tab.url && SUPPORTED_RE.test(tab.url));
     $("start").disabled = !onVideoSite;
-    $("start-hint").textContent = onVideoSite ? "" : "To start one, open YouTube, Netflix or Apple TV in this tab.";
+    $("start-hint").textContent = onVideoSite ? "" : "To start one, open YouTube, Netflix, Apple TV or Shahid in this tab.";
     return;
   }
 

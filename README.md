@@ -4,7 +4,7 @@ A Chrome extension for watching together, in sync, from different countries.
 Each of you streams from your own account; the extension just makes sure that
 when one of you presses play, pauses, or jumps, the other one does too.
 
-Supports **YouTube**, **Netflix** and **Apple TV** (tv.apple.com in Chrome). More sites are a small adapter away (see below).
+Supports **YouTube**, **Netflix**, **Apple TV** (tv.apple.com in Chrome) and **Shahid**. More sites are a small adapter away (see below).
 
 ```
  Berlin                         relay server                       Cairo
@@ -20,7 +20,7 @@ No video ever goes through the server — only small messages.
 
 1. Install the extension. The first time you open it, it asks for your name
    (you can change it any time, even mid-party).
-2. Open a video on YouTube, Netflix or tv.apple.com, click the extension,
+2. Open a video on YouTube, Netflix, tv.apple.com or Shahid, click the extension,
    **Start a party**, then **Copy invite link**.
 3. Send the link. Your partner opens it and lands on a little invite page
    ("Matteo saved you a seat", what's playing, live position). One click on
@@ -95,6 +95,11 @@ the built-in one, enter `http://localhost:8787` in the popup's *Advanced* field.
   others get a "Join them" button.
 - **After an update:** the extension puts fresh copies of itself into tabs
   that were already open, so nobody has to reload their video tab.
+- **Links across countries:** shared links are made country-neutral (Apple TV
+  drops its /de/, /eg/ part) and opened in each person's own country, so
+  nobody gets a "choose your country" page.
+- **A joiner's first click:** until a joiner has lined up with the host once,
+  their play button pulls them to the host instead of moving everyone.
 - **Connection:** WebSocket if possible, otherwise HTTP long-polling.
 - **Clocks:** the background worker pings the relay (NTP-style, lowest
   round-trip wins) so "playing at 12:34, sent at T" means the same thing on
@@ -118,7 +123,8 @@ extension/
       youtube.js         YouTube adapter
       netflix.js         Netflix adapter (seeks via netflix-main.js)
       netflix-main.js    runs in Netflix's page to reach its player API
-      appletv.js         Apple TV adapter (video inside shadow DOM)
+      appletv.js         Apple TV adapter (video inside shadow DOM, country-neutral links)
+      shahid.js          Shahid adapter
 server.js                entry point (what the host runs)
 public/join.html         the invite page served at /join/<code>
 lib/relay.js             the relay (Node + ws)
@@ -157,7 +163,7 @@ seeks to `netflix-main.js`, which runs in the page's own context (manifest
 npm test                                   # relay (both transports) + sync math
 cd e2e && npm install && npm test          # full browser test (needs Chrome, ffmpeg, openssl)
 cd e2e && HTTP_ONLY=1 npm test             # same, with WebSockets blocked
-node e2e/sites.js                          # Netflix + Apple TV adapters against mock pages
+node e2e/sites.js                          # Netflix, Apple TV, Shahid adapters against mock pages
 node e2e/invite.js                         # names, invite page, joining from any tab
 node e2e/robust.js                         # host picks a video after inviting; re-injection
 ```
@@ -170,9 +176,8 @@ and the "watching something else" prompt.
 
 ## Known limitations / next ideas
 
-- Netflix and Apple TV are tested against mock pages that copy their player
-  structure, not the real sites. Ads on Netflix/Apple TV aren't detected yet
-  (YouTube only).
+- Netflix, Apple TV and Shahid are tested against mock pages that copy their
+  player structure, not the real sites. Ads are only detected on YouTube.
 - Netflix and Apple TV catalogs differ by country: both people need the title
   available in their region.
 - Desktop Chrome/Edge only (no phones, no Fire TV — unless the laptop is on HDMI).

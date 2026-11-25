@@ -25,6 +25,9 @@ function fixtures() {
   if (!fs.existsSync(path.join(FIX, "video.mp4"))) {
     execSync(`ffmpeg -loglevel error -y -f lavfi -i testsrc=duration=300:size=320x180:rate=25 -c:v libx264 -pix_fmt yuv420p -movflags +faststart "${FIX}/video.mp4"`);
   }
+  if (!fs.existsSync(path.join(FIX, "ad.mp4"))) {
+    execSync(`ffmpeg -loglevel error -y -f lavfi -i testsrc2=duration=8:size=160x90:rate=25 -c:v libx264 -pix_fmt yuv420p -movflags +faststart "${FIX}/ad.mp4"`);
+  }
   if (!fs.existsSync(path.join(FIX, "cert.pem"))) {
     execSync(`openssl req -x509 -newkey rsa:2048 -nodes -keyout "${FIX}/key.pem" -out "${FIX}/cert.pem" -days 30 -subj "/CN=localhost"`, { stdio: "ignore" });
   }
@@ -56,6 +59,11 @@ const NETFLIX_PAGE = `<!doctype html><html><body>
 </script>
 </body></html>`;
 
+const SHAHID_PAGE = `<!doctype html><html><head><title>Watch Some Show S1 E1 | Shahid</title></head><body>
+<div class="player"><video id="ad" src="/ad.mp4" muted playsinline loop width="80"></video>
+<video id="main" src="/video.mp4" muted playsinline width="320"></video></div>
+</body></html>`;
+
 const APPLE_PAGE = `<!doctype html><html><body>
 <apple-tv-plus-player></apple-tv-plus-player>
 <script>
@@ -66,6 +74,13 @@ const APPLE_PAGE = `<!doctype html><html><body>
       const root = this.attachShadow({ mode: "closed" });
       root.innerHTML = '<div class="wrapper"><video src="/video.mp4" muted playsinline width="320"></video></div>';
       window.__appleVideo = root.querySelector("video"); // test-only handle
+      // Egyptian-storefront pages load the player late, to test pressing play early.
+      if (location.pathname.startsWith("/eg/")) {
+        const v = window.__appleVideo;
+        const src = v.getAttribute("src");
+        v.removeAttribute("src");
+        setTimeout(() => { v.src = src; }, 2500);
+      }
     }
   });
 </script>
@@ -77,6 +92,10 @@ async function main() {
   await relay.listen();
   const web = https
     .createServer({ key: fs.readFileSync(path.join(FIX, "key.pem")), cert: fs.readFileSync(path.join(FIX, "cert.pem")) }, (req, res) => {
+      if (req.url.startsWith("/ad.mp4")) {
+        res.writeHead(200, { "content-type": "video/mp4" });
+        return res.end(fs.readFileSync(path.join(FIX, "ad.mp4")));
+      }
       if (req.url.startsWith("/video.mp4")) {
         const data = fs.readFileSync(path.join(FIX, "video.mp4"));
         const range = req.headers.range;
@@ -96,7 +115,11 @@ async function main() {
         return res.end(data);
       }
       res.writeHead(200, { "content-type": "text/html" });
-      res.end(req.headers.host.includes("netflix") ? NETFLIX_PAGE : APPLE_PAGE);
+      const host = req.headers.host || "";
+      if (host.includes("netflix")) return res.end(NETFLIX_PAGE);
+      if (host.includes("shahid")) return res.end(SHAHID_PAGE);
+      if (req.url === "/" || !req.url.includes("umc.cmc")) return res.end("<!doctype html><title>Apple TV</title><p>browse</p>");
+      res.end(APPLE_PAGE);
     })
     .listen(8443);
 
@@ -114,7 +137,7 @@ async function main() {
         "--headless=new",
         `--disable-extensions-except=${EXT}`,
         `--load-extension=${EXT}`,
-        "--host-resolver-rules=MAP www.netflix.com 127.0.0.1:8443, MAP tv.apple.com 127.0.0.1:8443, MAP relay.test 127.0.0.1",
+        "--host-resolver-rules=MAP www.netflix.com 127.0.0.1:8443, MAP tv.apple.com 127.0.0.1:8443, MAP shahid.mbc.net 127.0.0.1:8443, MAP relay.test 127.0.0.1",
         "--ignore-certificate-errors",
         "--autoplay-policy=no-user-gesture-required",
         "--no-proxy-server",
@@ -243,6 +266,59 @@ async function main() {
     getVideo: atGetVideo,
     userSeek: (t) => (window.__appleVideo.currentTime = t),
   });
+
+  // Shahid: English and Arabic links to the same episode count as the same thing.
+  await runSite({
+    label: "Shahid",
+    urlA: "https://shahid.mbc.net/en/player/episodes/Some-Show-S1-E1/id-1234567",
+    urlB: "https://shahid.mbc.net/ar/player/episodes/Some-Show-S1-E1/id-1234567",
+    room: "sh-room",
+    getVideo: '() => document.querySelector("#main")',
+    userSeek: (t) => (document.querySelector("#main").currentTime = t),
+  });
+
+  // Apple TV follow: the joiner (Egypt) lands on HER country's page, not the host's.
+  console.log("\n=== Apple TV: follow into your own country ===");
+  {
+    const A = await launch("at-host", "https://tv.apple.com/de/movie/some-film/umc.cmc.5abc123def");
+    const B = await launch("at-joiner", "https://tv.apple.com/eg/");
+    await sleep(800);
+    const store = await B.sw.evaluate(async () => (await chrome.storage.local.get("appleStorefront")).appleStorefront);
+    check("joiner's Apple country remembered", store === "eg");
+    await A.sw.evaluate(() => setName("Matteo"));
+    await B.sw.evaluate(() => setName("Yasso"));
+    const tabA = await A.sw.evaluate(async () => (await chrome.tabs.query({ url: "https://tv.apple.com/*" }))[0].id);
+    await A.sw.evaluate(([s, t]) => join({ room: "at-follow", serverUrl: s, tabId: t }), [SERVER_URL, tabA]);
+    await sleep(1200);
+    await A.page.mouse.click(5, 5);
+    await A.page.evaluate(() => {
+      window.__appleVideo.currentTime = 50;
+      return window.__appleVideo.play();
+    });
+    const info = await (await fetch("http://127.0.0.1:8787/api/room/at-follow")).json();
+    check("shared Apple link has no country in it", info.mediaUrl === "https://tv.apple.com/movie/some-film/umc.cmc.5abc123def");
+
+    // Joiner starts from a non-video page and joins by code.
+    const tabB = await B.sw.evaluate(async () => (await chrome.tabs.query({ url: "https://tv.apple.com/*" }))[0].id);
+    await B.page.goto("http://relay.test:8787/");
+    await B.sw.evaluate(([s, t]) => join({ room: "at-follow", serverUrl: s, tabId: t, follow: true }), [SERVER_URL, tabB]);
+    await B.page.waitForURL(/tv\.apple\.com/, { timeout: 10000 }).catch(() => {});
+    console.log("  joiner landed on:", B.page.url());
+    check("joiner opened HER country's page (/eg/)", B.page.url() === "https://tv.apple.com/eg/movie/some-film/umc.cmc.5abc123def");
+
+    // Her player loads late; she presses play the moment it's there.
+    await B.page.waitForFunction(() => window.__appleVideo && window.__appleVideo.readyState > 0, null, { timeout: 8000 }).catch(() => {});
+    await B.page.mouse.click(5, 5);
+    await B.page.evaluate(() => window.__appleVideo.play().catch(() => {}));
+    await sleep(3000);
+    const a = await A.page.evaluate(() => ({ t: window.__appleVideo.currentTime, paused: window.__appleVideo.paused }));
+    const b = await B.page.evaluate(() => ({ t: window.__appleVideo.currentTime, paused: window.__appleVideo.paused }));
+    console.log(`  A=${JSON.stringify(a)} B=${JSON.stringify(b)}`);
+    check("early play by joiner didn't send host back", a.t > 50 && !a.paused);
+    check("joiner ended up with the host", Math.abs(a.t - b.t) < 0.5 && !b.paused);
+    await A.ctx.close();
+    await B.ctx.close();
+  }
 
   web.close();
   await relay.close();

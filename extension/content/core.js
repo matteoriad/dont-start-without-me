@@ -55,6 +55,7 @@
   let followPending = false; // just joined: go to whatever the host is watching
   let announcedMedia = undefined; // what the host last told the room it has open
   let lastSwitchToast = 0;
+  let latestHostState = null; // most recent playback state from the host
 
   let inAd = false;
   let adAnnounced = false;
@@ -69,6 +70,21 @@
   const othersHere = () => peers.some((p) => p.id !== myId);
   const nameOf = (id) => (peers.find((p) => p.id === id) || {}).name || "Your partner";
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+  // Open what someone else is watching. The background adjusts the link for
+  // us first (e.g. Apple TV's country), falling back to opening it as is.
+  function navigateTo(url) {
+    try {
+      chrome.runtime
+        .sendMessage({ type: "navigate", url })
+        .then((r) => {
+          if (!r || !r.ok) window.location.href = url;
+        })
+        .catch(() => (window.location.href = url));
+    } catch {
+      window.location.href = url;
+    }
+  }
 
   for (const type of ["pointerdown", "pointerup", "keydown", "keyup"]) {
     window.addEventListener(
@@ -164,6 +180,13 @@
 
   function onLocal(reason) {
     if (!active || !controls || suppressed() || !adapter.isReady() || !userActed()) return;
+    // A joiner pressing play before they've lined up with the host (e.g. on a
+    // title page that needs a click to start) means "take me to the host",
+    // not "everyone jump to where I am".
+    if (!isHost() && !synced) {
+      if (latestHostState) applyRemote(latestHostState);
+      return;
+    }
     if (reason === "play") pausedForAd = false; // they chose to carry on
     broadcast(reason);
   }
@@ -271,6 +294,7 @@
 
   function applyRemote(msg) {
     if (!active || msg.from === myId) return;
+    if (msg.from === hostId) latestHostState = msg;
     // Only the host corrects drift.
     if (msg.reason === "heartbeat" && msg.from !== hostId) return;
     const name = msg.fromName || "Your partner";
@@ -282,14 +306,14 @@
       if (followPending && msg.mediaUrl) {
         // We just joined: go straight to the host's title, no questions asked.
         followPending = false;
-        window.location.href = msg.mediaUrl;
+        navigateTo(msg.mediaUrl);
         return;
       }
       if (msg.mediaUrl && Date.now() - lastMismatchToast > MISMATCH_TOAST_EVERY_MS) {
         lastMismatchToast = Date.now();
         ui.toast(`${name} is watching something else.`, {
           label: "Join them",
-          onClick: () => (window.location.href = msg.mediaUrl),
+          onClick: () => navigateTo(msg.mediaUrl),
         });
       }
       return;
@@ -358,14 +382,14 @@
     }
     if (followPending) {
       followPending = false;
-      window.location.href = msg.mediaUrl;
+      navigateTo(msg.mediaUrl);
       return;
     }
     if (msg.from === hostId && Date.now() - lastSwitchToast > 5000) {
       lastSwitchToast = Date.now();
       ui.toast(`${msg.fromName || "The host"} switched to something else.`, {
         label: "Join them",
-        onClick: () => (window.location.href = msg.mediaUrl),
+        onClick: () => navigateTo(msg.mediaUrl),
       });
     }
   }
@@ -469,6 +493,7 @@
     synced = false;
     helloPending = false;
     followPending = false;
+    latestHostState = null;
     announcedMedia = undefined;
     adAnnounced = false;
     adPeers.clear();

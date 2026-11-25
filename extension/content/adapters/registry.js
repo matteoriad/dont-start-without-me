@@ -39,6 +39,23 @@
     return out;
   };
 
+  // The main video among several (ads, previews, trailers): the longest one,
+  // and among similar lengths the biggest on screen.
+  DSWM.pickMainVideo = (videos) => {
+    const area = (v) => {
+      const r = v.getBoundingClientRect();
+      return r.width * r.height;
+    };
+    const dur = (v) => (isFinite(v.duration) ? v.duration : 0);
+    return (
+      [...videos].sort((a, b) => {
+        const d = dur(b) - dur(a);
+        if (Math.abs(d) > 30) return d;
+        return area(b) - area(a);
+      })[0] || null
+    );
+  };
+
   // Default controls: talk to the HTML5 <video> element directly.
   DSWM.videoControls = (video) => ({
     play: () => video.play().catch(() => {}),

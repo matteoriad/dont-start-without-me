@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Don't Start Without Me",
-  "version": "0.6.0",
-  "description": "Watch together, in sync, from different countries. YouTube, Netflix and Apple TV.",
+  "version": "0.7.0",
+  "description": "Watch together, in sync, from different countries. YouTube, Netflix, Apple TV and Shahid.",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",
@@ -12,7 +12,8 @@
     "https://www.youtube.com/*",
     "https://m.youtube.com/*",
     "https://www.netflix.com/*",
-    "https://tv.apple.com/*"
+    "https://tv.apple.com/*",
+    "https://shahid.mbc.net/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -48,7 +49,8 @@
         "https://www.youtube.com/*",
         "https://m.youtube.com/*",
         "https://www.netflix.com/*",
-        "https://tv.apple.com/*"
+        "https://tv.apple.com/*",
+        "https://shahid.mbc.net/*"
       ],
       "js": [
         "content/sync-math.js",
@@ -56,6 +58,7 @@
         "content/adapters/youtube.js",
         "content/adapters/netflix.js",
         "content/adapters/appletv.js",
+        "content/adapters/shahid.js",
         "content/core.js"
       ],
       "run_at": "document_idle"

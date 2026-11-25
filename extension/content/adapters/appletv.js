@@ -10,17 +10,37 @@
     return ids ? ids[ids.length - 1] : null;
   }
 
-  // Searching every shadow root is expensive, so remember the last hit and
-  // only search again every couple of seconds if it's gone.
+  // Remember this person's own Apple country, so links from someone in
+  // another country can be opened in theirs (otherwise Apple asks to pick one).
+  const storefront = window.location.pathname.match(/^\/([a-z]{2})(?=\/)/i);
+  if (storefront) {
+    try {
+      chrome.storage.local.set({ appleStorefront: storefront[1].toLowerCase() });
+    } catch {}
+  }
+
+  // A link without the country part; the extension adds the right one when
+  // it opens it for someone (see localizeUrl in background.js).
+  function neutralUrl() {
+    const u = new URL(window.location.href);
+    u.pathname = u.pathname.replace(/^\/[a-z]{2}(?=\/)/i, "");
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  }
+
+  // Searching every shadow root is expensive, so remember the last hit. Keep
+  // looking every couple of seconds while we only have a short clip (trailer /
+  // preview loop), since the real player may show up later.
   let cached = null;
   let lastSearch = 0;
   function findVideo() {
-    if (cached && cached.isConnected) return cached;
-    if (Date.now() - lastSearch < 2000) return null;
+    const good = cached && cached.isConnected && cached.duration > 300;
+    if (good || Date.now() - lastSearch < 2000) return cached && cached.isConnected ? cached : null;
     lastSearch = Date.now();
     const videos = DSWM.deepQueryAll("video");
     // Prefer the longest one (the show, not a trailer/preview loop).
-    cached = videos.sort((a, b) => (b.duration || 0) - (a.duration || 0))[0] || null;
+    cached = DSWM.pickMainVideo(videos) || null;
     return cached;
   }
 
@@ -33,7 +53,7 @@
 
     getMediaId: () => (contentId() ? `appletv:${contentId()}` : null),
 
-    getMediaUrl: () => window.location.href,
+    getMediaUrl: neutralUrl,
 
     getTitle: () => document.title.replace(/\s*[-–|]\s*Apple TV.*$/i, "").trim() || null,
 

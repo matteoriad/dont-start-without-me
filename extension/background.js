@@ -7,7 +7,7 @@ const math = self.DSWM.math;
 const DEFAULT_SERVER = self.DSWM_CONFIG.serverUrl;
 // Pages where the extension can sync a player. Anything else (a blank tab,
 // the invite page, …) gets navigated to the host's title after joining.
-const SUPPORTED_RE = /^https:\/\/((www\.|m\.)?youtube\.com|www\.netflix\.com|tv\.apple\.com)\//;
+const SUPPORTED_RE = /^https:\/\/((www\.|m\.)?youtube\.com|www\.netflix\.com|tv\.apple\.com|shahid\.mbc\.net)\//;
 const KEEPALIVE_MS = 20_000; // keeps the service worker (and a WebSocket) alive
 const CLOCK_SYNC_MS = 30_000;
 
@@ -160,8 +160,26 @@ async function maybeFollow(state) {
     return;
   }
   if (!SUPPORTED_RE.test(tab.url || "")) {
-    chrome.tabs.update(party.tabId, { url: state.mediaUrl }).catch(() => {});
+    chrome.tabs.update(party.tabId, { url: await localizeUrl(state.mediaUrl) }).catch(() => {});
   }
+}
+
+// Make a shared link work for *this* person. Apple TV links carry a country
+// (/de/, /eg/…); opening someone else's makes Apple ask you to pick a country,
+// so use our own (remembered from earlier visits) or none and let Apple choose.
+async function localizeUrl(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return url;
+  }
+  if (u.hostname === "tv.apple.com") {
+    const { appleStorefront } = await chrome.storage.local.get("appleStorefront");
+    const path = u.pathname.replace(/^\/[a-z]{2}(?=\/)/i, "");
+    u.pathname = appleStorefront ? `/${appleStorefront}${path}` : path;
+  }
+  return u.toString();
 }
 
 // ---------------------------------------------------------------- content scripts
@@ -313,6 +331,11 @@ chrome.runtime.onMessage.addListener((m, sender, sendResponse) => {
       }
       case "popup-join":
         return join(m);
+      case "navigate":
+        // A party tab wants to open what someone else is watching.
+        if (!sender.tab) return { ok: false };
+        await chrome.tabs.update(sender.tab.id, { url: await localizeUrl(m.url) });
+        return { ok: true };
       case "invite-join":
         // From the invite page: join in that tab, then go to the host's title.
         if (!sender.tab) return { ok: false };
