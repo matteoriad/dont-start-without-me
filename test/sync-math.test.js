@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert");
-const math = require("../../extension/content/sync-math.js");
+const math = require("../extension/content/sync-math.js");
 
 test("expectedPosition adds elapsed time only while playing", () => {
   assert.equal(math.expectedPosition({ playing: false, position: 10, sentAt: 0 }, 5000), 10);

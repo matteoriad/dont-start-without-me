@@ -1,14 +1,15 @@
-// Background service worker: owns the WebSocket to the relay, the room, and
+// Background service worker: owns the connection to the relay, the room, and
 // the clock offset. The content script in the "party tab" does the actual
 // video work; this worker just shuttles messages.
-importScripts("content/sync-math.js");
+importScripts("config.js", "content/sync-math.js", "transport.js");
 const math = self.DSWM.math;
 
-const DEFAULTS = { serverUrl: "ws://localhost:8787", name: "", room: "" };
-const KEEPALIVE_MS = 20_000; // Chrome 116+ keeps the worker alive while a WebSocket is active
+const DEFAULT_SERVER = self.DSWM_CONFIG.serverUrl;
+const KEEPALIVE_MS = 20_000; // keeps the service worker (and a WebSocket) alive
 const CLOCK_SYNC_MS = 30_000;
 
-let ws = null;
+let conn = null; // transport from transport.js
+let connectGen = 0; // bumps on every connect/leave so stale attempts give up
 let party = null; // { room, name, serverUrl, tabId } while in a party
 let status = "idle"; // idle | connecting | connected | reconnecting | error
 let lastError = null;
@@ -18,7 +19,7 @@ let lastState = null;
 let samples = [];
 let offset = 0;
 let keepaliveTimer = null;
-let clockTimer = null;
+let clockTimers = [];
 let reconnectTimer = null;
 let reconnectDelay = 1000;
 
@@ -32,52 +33,48 @@ const restored = chrome.storage.session.get("party").then(({ party: saved }) => 
 
 // ---------------------------------------------------------------- connection
 
-function connect() {
+async function connect() {
   clearTimeout(reconnectTimer);
   stopTimers();
-  if (ws) {
-    ws.onclose = null;
-    ws.close();
+  if (conn) {
+    conn.close();
+    conn = null;
   }
-  status = status === "connected" ? "reconnecting" : "connecting";
-  lastError = null;
+  if (!party) return;
+  const gen = ++connectGen;
+  status = status === "connected" || status === "reconnecting" ? "reconnecting" : "connecting";
+  let t;
   try {
-    ws = new WebSocket(party.serverUrl);
-  } catch (e) {
-    fail(`Bad server URL: ${party.serverUrl}`);
-    return;
-  }
-
-  ws.onopen = () => {
-    reconnectDelay = 1000;
-    sendRaw({ type: "join", room: party.room, name: party.name });
-    startClockSync();
-    keepaliveTimer = setInterval(() => sendRaw({ type: "keepalive" }), KEEPALIVE_MS);
-  };
-
-  ws.onmessage = (ev) => {
-    let msg;
-    try {
-      msg = JSON.parse(ev.data);
-    } catch {
-      return;
-    }
-    handleServer(msg);
-  };
-
-  ws.onerror = () => {
+    t = await self.DSWM.connectRelay(party.serverUrl, {
+      onMessage: (msg) => conn === t && handleServer(msg),
+      onClose: () => conn === t && onDisconnected(),
+    });
+  } catch {
+    if (gen !== connectGen) return;
     lastError = "Can't reach the server.";
-  };
+    return onDisconnected();
+  }
+  if (gen !== connectGen || !party) return t.close(); // left or rejoined meanwhile
+  conn = t;
+  lastError = null;
+  reconnectDelay = 1000;
+  sendRaw({ type: "join", room: party.room, name: party.name });
+  startClockSync();
+  // Any extension API call keeps an MV3 worker alive; the WebSocket message too.
+  keepaliveTimer = setInterval(() => {
+    chrome.runtime.getPlatformInfo(() => {});
+    if (conn && conn.kind === "ws") sendRaw({ type: "keepalive" });
+  }, KEEPALIVE_MS);
+}
 
-  ws.onclose = () => {
-    stopTimers();
-    ws = null;
-    myId = null;
-    if (!party) return;
-    status = "reconnecting";
-    reconnectTimer = setTimeout(connect, reconnectDelay);
-    reconnectDelay = Math.min(reconnectDelay * 2, 15000);
-  };
+function onDisconnected() {
+  stopTimers();
+  conn = null;
+  myId = null;
+  if (!party) return;
+  status = "reconnecting";
+  reconnectTimer = setTimeout(connect, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, 15000);
 }
 
 function fail(message) {
@@ -87,19 +84,20 @@ function fail(message) {
 
 function stopTimers() {
   clearInterval(keepaliveTimer);
-  clearInterval(clockTimer);
-  keepaliveTimer = clockTimer = null;
+  keepaliveTimer = null;
+  clockTimers.forEach((t) => clearTimeout(t) || clearInterval(t));
+  clockTimers = [];
 }
 
 function sendRaw(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  if (conn) conn.send(msg);
 }
 
 function startClockSync() {
   samples = [];
   // A quick burst for a good first estimate, then occasional refreshes.
-  for (let i = 0; i < 6; i++) setTimeout(() => sendRaw({ type: "ping", t0: Date.now() }), i * 250);
-  clockTimer = setInterval(() => sendRaw({ type: "ping", t0: Date.now() }), CLOCK_SYNC_MS);
+  for (let i = 0; i < 6; i++) clockTimers.push(setTimeout(() => sendRaw({ type: "ping", t0: Date.now() }), 300 + i * 250));
+  clockTimers.push(setInterval(() => sendRaw({ type: "ping", t0: Date.now() }), CLOCK_SYNC_MS));
 }
 
 function handleServer(msg) {
@@ -144,11 +142,12 @@ function toTab(message) {
 
 async function join({ room, name, serverUrl, tabId }) {
   if (party && party.tabId !== tabId) toTabId(party.tabId, { type: "party", active: false });
-  party = { room, name: name || "Someone", serverUrl: serverUrl || DEFAULTS.serverUrl, tabId };
+  party = { room, name: name || "Someone", serverUrl: serverUrl || DEFAULT_SERVER, tabId };
   peers = [];
   lastState = null;
   await chrome.storage.session.set({ party });
-  await chrome.storage.local.set({ serverUrl: party.serverUrl, name: party.name, room });
+  // Only remember a server if the user deliberately picked a different one.
+  await chrome.storage.local.set({ name: party.name, room, serverUrl: serverUrl && serverUrl !== DEFAULT_SERVER ? serverUrl : "" });
   status = "connecting";
   connect();
   let tabReady = true;
@@ -161,13 +160,14 @@ async function join({ room, name, serverUrl, tabId }) {
 }
 
 async function leave() {
+  connectGen++;
   if (party) toTabId(party.tabId, { type: "party", active: false });
   party = null;
   sendRaw({ type: "leave" });
-  if (ws) {
-    ws.onclose = null;
-    ws.close();
-    ws = null;
+  if (conn) {
+    const c = conn;
+    conn = null;
+    setTimeout(() => c.close(), 300); // let the "leave" go out first
   }
   stopTimers();
   clearTimeout(reconnectTimer);
@@ -200,8 +200,18 @@ chrome.runtime.onMessage.addListener((m, sender, sendResponse) => {
         if (party && sender.tab && sender.tab.id === party.tabId) sendRaw(m.msg);
         return { ok: true };
       case "popup-get": {
-        const saved = await chrome.storage.local.get(DEFAULTS);
-        return { party, status, lastError, myId, peers, offset, saved: { ...DEFAULTS, ...saved } };
+        const saved = await chrome.storage.local.get({ name: "", room: "", serverUrl: "" });
+        return {
+          party,
+          status,
+          lastError,
+          myId,
+          peers,
+          offset,
+          transport: conn ? conn.kind : null,
+          defaultServer: DEFAULT_SERVER,
+          saved,
+        };
       }
       case "popup-join":
         return join(m);

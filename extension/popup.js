@@ -1,12 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
-const STATUS_TEXT = {
-  idle: "Not connected.",
-  connecting: "Connecting…",
-  connected: "Connected.",
-  reconnecting: "Connection lost, reconnecting…",
-  error: "Something's wrong.",
-};
+const ROOM_RE = /^[A-Za-z0-9-]{3,32}$/;
+const SUPPORTED_RE = /^https:\/\/(www\.|m\.)?youtube\.com\//;
 
 const WORDS_A = ["nile", "spree", "popcorn", "couch", "snack", "remote", "blanket", "koshary", "pretzel"];
 const WORDS_B = ["party", "night", "club", "date", "gang", "crew"];
@@ -24,6 +19,14 @@ async function activeTab() {
 let filledForm = false;
 let localError = "";
 
+function statusText(s) {
+  if (s.status === "connected") return "Connected.";
+  if (s.status === "connecting") return "Connecting…";
+  if (s.status === "reconnecting") return "Connection lost, reconnecting…";
+  if (s.status === "error") return "Something's wrong.";
+  return "Not connected.";
+}
+
 async function render() {
   const s = await chrome.runtime.sendMessage({ type: "popup-get" });
   const inParty = Boolean(s.party);
@@ -34,47 +37,42 @@ async function render() {
   if (!inParty) {
     if (!filledForm) {
       $("name").value = s.saved.name;
-      $("room").value = s.saved.room;
       $("server").value = s.saved.serverUrl;
+      $("server").placeholder = s.defaultServer;
       filledForm = true;
     }
     const tab = await activeTab();
-    const supported = tab && tab.url && /^https:\/\/(www\.|m\.)?youtube\.com\//.test(tab.url);
-    $("join").disabled = !supported;
-    $("join-hint").textContent = supported ? "" : "Open a YouTube video in this tab first. (More sites coming.)";
+    const supported = Boolean(tab && tab.url && SUPPORTED_RE.test(tab.url));
+    $("start").disabled = $("join").disabled = !supported;
+    $("join-hint").textContent = supported ? "" : "Open a YouTube video in this tab first.";
     return;
   }
 
   $("room-code").textContent = s.party.room;
-  $("status").textContent = STATUS_TEXT[s.status] || s.status;
+  $("status").textContent = statusText(s);
   const list = $("peers");
   list.replaceChildren();
   const others = s.peers.filter((p) => p.id !== s.myId);
-  if (s.status === "connected" && others.length === 0) {
-    const li = document.createElement("li");
-    li.textContent = "Nobody else yet. Send them the room code.";
-    list.appendChild(li);
-  }
   for (const p of s.peers) {
     const li = document.createElement("li");
     li.textContent = p.id === s.myId ? `${p.name} (you)` : p.name;
     list.appendChild(li);
   }
+  if (s.status === "connected" && others.length === 0) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = "Waiting for them to join…";
+    list.appendChild(li);
+  }
 }
 
-$("dice").addEventListener("click", () => {
-  $("room").value = randomRoom();
-});
-
-$("join").addEventListener("click", async () => {
-  const room = $("room").value.trim() || randomRoom();
-  $("room").value = room;
-  if (!/^[A-Za-z0-9-]{3,32}$/.test(room)) {
-    localError = "Room codes are 3–32 letters, numbers or dashes.";
+async function joinRoom(room) {
+  localError = "";
+  if (!ROOM_RE.test(room)) {
+    localError = "Party codes are 3–32 letters, numbers or dashes.";
     $("error").textContent = localError;
     return;
   }
-  localError = "";
   const tab = await activeTab();
   const res = await chrome.runtime.sendMessage({
     type: "popup-join",
@@ -83,11 +81,13 @@ $("join").addEventListener("click", async () => {
     serverUrl: $("server").value.trim(),
     tabId: tab.id,
   });
-  if (res && !res.tabReady) {
-    localError = "Reload this tab once so the extension can hook into the player.";
-  }
+  if (res && !res.tabReady) localError = "Reload this tab once so the extension can hook into the player.";
   render();
-});
+}
+
+$("start").addEventListener("click", () => joinRoom(randomRoom()));
+$("join").addEventListener("click", () => joinRoom($("room").value.trim().toLowerCase()));
+$("room").addEventListener("keydown", (e) => e.key === "Enter" && $("join").click());
 
 $("leave").addEventListener("click", async () => {
   await chrome.runtime.sendMessage({ type: "popup-leave" });
@@ -98,8 +98,8 @@ $("leave").addEventListener("click", async () => {
 
 $("copy").addEventListener("click", async () => {
   await navigator.clipboard.writeText($("room-code").textContent);
-  $("copy").textContent = "✅";
-  setTimeout(() => ($("copy").textContent = "📋"), 1200);
+  $("copy").textContent = "Copied";
+  setTimeout(() => ($("copy").textContent = "Copy"), 1200);
 });
 
 render();

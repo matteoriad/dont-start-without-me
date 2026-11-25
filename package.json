@@ -1,7 +1,7 @@
 {
-  "name": "dont-start-without-me-relay",
-  "version": "0.1.0",
-  "description": "Tiny WebSocket relay for Don't Start Without Me watch parties",
+  "name": "dont-start-without-me",
+  "version": "0.2.0",
+  "description": "Relay server for the Don't Start Without Me watch-party Chrome extension",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

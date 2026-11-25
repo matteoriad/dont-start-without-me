@@ -5,12 +5,16 @@ const fs = require("fs");
 const https = require("https");
 const { execSync } = require("child_process");
 const { chromium } = require("playwright");
-const { createRelay } = require("../server/server.js");
+const { createRelay } = require("../server.js");
 
 // Usage: CHROME=/path/to/chrome node e2e/run.js   (needs ffmpeg + openssl for fixtures)
 const EXT = path.resolve(__dirname, "../extension");
 const FIX = path.join(__dirname, ".fixtures");
 const CHROME = process.env.CHROME || "/usr/bin/google-chrome";
+// HTTP_ONLY=1 simulates a host that blocks WebSockets (e.g. Hostinger managed Node.js).
+const HTTP_ONLY = process.env.HTTP_ONLY === "1";
+// A non-localhost name, so we also prove plain-http servers work from the extension.
+const SERVER_URL = "http://relay.test:8787";
 
 function fixtures() {
   fs.mkdirSync(FIX, { recursive: true });
@@ -29,7 +33,7 @@ const PAGE = `<!doctype html><html><body>
 
 async function main() {
   fixtures();
-  const relay = createRelay({ port: 8787, log: () => {} });
+  const relay = createRelay({ port: 8787, log: () => {}, disableWebSocket: HTTP_ONLY });
   await relay.listen();
   const web = https
     .createServer({ key: fs.readFileSync(path.join(FIX, "key.pem")), cert: fs.readFileSync(path.join(FIX, "cert.pem")) }, (req, res) => {
@@ -64,7 +68,7 @@ async function main() {
         "--headless=new",
         `--disable-extensions-except=${EXT}`,
         `--load-extension=${EXT}`,
-        "--host-resolver-rules=MAP www.youtube.com 127.0.0.1:8443",
+        "--host-resolver-rules=MAP www.youtube.com 127.0.0.1:8443, MAP relay.test 127.0.0.1",
         "--ignore-certificate-errors",
         "--autoplay-policy=no-user-gesture-required",
         "--no-proxy-server",
@@ -83,13 +87,16 @@ async function main() {
   await sleep(1500);
 
   for (const p of [A, B]) {
-    const res = await p.sw.evaluate(async (name) => {
+    const res = await p.sw.evaluate(async ([name, serverUrl]) => {
       const [t] = await chrome.tabs.query({ url: "https://www.youtube.com/*" });
-      return join({ room: "e2e-room", name, serverUrl: "ws://127.0.0.1:8787", tabId: t.id });
-    }, p.name === "A" ? "Matteo" : "Yasso");
+      return join({ room: "e2e-room", name, serverUrl, tabId: t.id });
+    }, [p.name === "A" ? "Matteo" : "Yasso", SERVER_URL]);
     console.log(p.name, "join ->", JSON.stringify(res));
   }
-  await sleep(2000);
+  await sleep(HTTP_ONLY ? 7000 : 2000); // HTTP mode first tries the WebSocket for up to 4 s
+
+  const kinds = await Promise.all([A, B].map((p) => p.sw.evaluate(() => (conn ? conn.kind : null))));
+  console.log("transports:", kinds.join(", "));
 
   const v = (p) =>
     p.page.evaluate(() => {
@@ -108,6 +115,7 @@ async function main() {
     console.log(ok ? "PASS" : "FAIL", name);
   };
 
+  check(`using ${HTTP_ONLY ? "http" : "ws"} transport`, kinds.every((k) => k === (HTTP_ONLY ? "http" : "ws")));
   console.log("pill B:", JSON.stringify(await toasts(B)));
   check("pill shows partner", (await toasts(B)).includes("Watching with Matteo"));
 

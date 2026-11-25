@@ -15,27 +15,31 @@
         Your name
         <input id="name" maxlength="40" placeholder="So they know who paused" />
       </label>
-      <label>
-        Room code
-        <div class="row">
-          <input id="room" maxlength="32" placeholder="e.g. nile-spree-42" />
-          <button id="dice" class="icon" title="Make one up for me">🎲</button>
-        </div>
-      </label>
-      <details>
-        <summary>Server</summary>
-        <input id="server" placeholder="ws://localhost:8787" />
-        <p class="hint">Both of you need the same server. See the README for a free one.</p>
-      </details>
-      <button id="join" class="primary">Start / join party in this tab</button>
+
+      <button id="start" class="primary">Start a party</button>
+
+      <p class="or">or join theirs</p>
+      <div class="row">
+        <input id="room" maxlength="32" placeholder="Their party code" />
+        <button id="join">Join</button>
+      </div>
+
       <p id="join-hint" class="hint"></p>
+
+      <details>
+        <summary>Advanced</summary>
+        <label>
+          Server
+          <input id="server" />
+        </label>
+      </details>
     </section>
 
     <section id="party-view" hidden>
+      <p class="label">Party code — send it to them</p>
       <div class="room">
-        <span>Room</span>
         <code id="room-code"></code>
-        <button id="copy" class="icon" title="Copy room code">📋</button>
+        <button id="copy" title="Copy party code">Copy</button>
       </div>
       <p id="status"></p>
       <ul id="peers"></ul>

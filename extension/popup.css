@@ -109,3 +109,27 @@ summary {
 #leave {
   width: 100%;
 }
+.or {
+  margin: 14px 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.row input {
+  margin-top: 0;
+}
+.label {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.muted {
+  color: var(--muted);
+}
+details {
+  margin-top: 14px;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

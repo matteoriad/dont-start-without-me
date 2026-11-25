@@ -16,45 +16,55 @@ Currently supports **YouTube**. More sites are a small adapter away (see below).
 
 No video ever goes through the server — only small messages.
 
-## Quick start (local, two Chrome profiles)
+## How it's meant to work
 
-1. **Run the relay**
-   ```bash
-   cd server
-   npm install
-   npm start            # relay listening on :8787
-   ```
-2. **Load the extension**: `chrome://extensions` → turn on *Developer mode* →
-   *Load unpacked* → pick the `extension/` folder.
-3. Open the **same YouTube video** in two Chrome profiles (or two machines).
-4. Click the extension icon → enter your name → pick a room code (or 🎲) →
-   **Start / join party in this tab**. Do the same with the same room code on
-   the other side.
-5. Press play. Don't start without them.
+1. Install the extension.
+2. Open a YouTube video, click the extension, **Start a party**.
+3. Send the party code to the other person. They open the same video and
+   paste it under **or join theirs**.
+4. Press play. Don't start without them.
 
-## Watching with someone in another country
+The relay server is built into the extension (`extension/config.js`), so
+nobody ever has to type a server address.
 
-Both of you need to reach the same relay, so it has to be on the internet.
+## Deploying the relay
 
-**Fastest test (5 minutes, free):** keep the relay running on your machine and
-expose it with a Cloudflare quick tunnel:
+The relay is the Node app at the root of this repo (`server.js`,
+`npm start`, listens on `PORT`, default 8787). It speaks two ways:
+
+- **WebSocket**: used automatically when the host allows it (any VPS).
+- **HTTP long-polling**: automatic fallback for hosts that block inbound
+  WebSockets, such as Hostinger's managed Node.js web apps. Slightly more
+  traffic, same sync quality.
+
+**Hostinger managed Node.js (deploy from GitHub):** add a Node.js web app,
+connect this repo, entry file `server.js`, start command `npm start`.
+Use the HTTPS address Hostinger gives the app.
+
+**Hostinger VPS (or any Linux server):**
 
 ```bash
-cd server && npm start
-# in another terminal:
-npx cloudflared tunnel --url http://localhost:8787
-# → prints https://something-random.trycloudflare.com
+git clone https://github.com/matteoriad/dont-start-without-me && cd dont-start-without-me
+npm install --omit=dev
+npx pm2 start server.js --name dswm && npx pm2 save   # keeps it running
 ```
 
-In the popup's *Server* field, both of you enter
-`wss://something-random.trycloudflare.com`. The URL changes every time you
-restart the tunnel.
+Open port 8787 in the firewall. The address is then `http://<server-ip>:8787`.
 
-**Permanent (free tier):** deploy `server/` to any Node host that supports
-WebSockets (e.g. Render, Fly.io, Railway). Start command: `npm start`; the
-server reads `PORT` from the environment. Then use `wss://your-app-host` in
-the popup. Free tiers often sleep when idle, so the first connection of the
-evening can take a moment.
+**Then:** put that address in `extension/config.js` and reload the extension.
+
+Check it's alive by opening the address in a browser: it says
+`ok — don't start without me`.
+
+## Developing locally
+
+```bash
+npm install && npm start                 # relay on http://localhost:8787
+```
+
+`chrome://extensions` → *Developer mode* → *Load unpacked* → `extension/`.
+Use two Chrome profiles to be both people. (`config.js` points at
+localhost by default; the popup's *Advanced* field overrides it.)
 
 ## How the sync works
 
@@ -66,6 +76,7 @@ evening can take a moment.
 - **Drift correction:** everyone else compares against the heartbeat.
   - more than 1.5 s apart → seek
   - 0.3 – 1.5 s → speed up / slow down slightly (max ±15%) until within 0.1 s
+- **Connection:** WebSocket if possible, otherwise HTTP long-polling.
 - **Clocks:** the background worker pings the relay (NTP-style, lowest
   round-trip wins) so "playing at 12:34, sent at T" means the same thing on
   both machines.
@@ -79,17 +90,18 @@ evening can take a moment.
 ```
 extension/
   manifest.json
-  background.js          WebSocket to the relay, room, clock offset
-  popup.html/.css/.js    join / leave UI
+  config.js              the built-in relay address
+  transport.js           WebSocket, or HTTP long-polling fallback
+  background.js          connection to the relay, room, clock offset
+  popup.html/.css/.js    start / join / leave UI
   content/
     sync-math.js         pure functions: drift, clock offset (unit-tested)
     core.js              the sync engine (site-agnostic)
     adapters/
       registry.js        adapter interface + default <video> controls
       youtube.js         YouTube adapter
-server/
-  server.js              the relay (Node + ws)
-  test/                  unit tests: `npm test`
+server.js                the relay (Node + ws), deployable from the repo root
+test/                    unit tests: `npm test`
 e2e/
   run.js                 two real Chrome profiles + fake YouTube page + relay
 ```
@@ -119,8 +131,9 @@ from a script injected into the page's main world.
 ## Tests
 
 ```bash
-cd server && npm test                  # relay + sync math
-cd e2e && npm install && npm test      # full browser test (needs Chrome, ffmpeg, openssl)
+npm test                                   # relay (both transports) + sync math
+cd e2e && npm install && npm test          # full browser test (needs Chrome, ffmpeg, openssl)
+cd e2e && HTTP_ONLY=1 npm test             # same, with WebSockets blocked
 ```
 
 The e2e test maps `www.youtube.com` to a local HTTPS page with a test video,
