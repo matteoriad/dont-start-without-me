@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const WebSocket = require("ws");
-const { createRelay } = require("../server");
+const { createRelay } = require("../lib/relay");
 
 function client(port) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);

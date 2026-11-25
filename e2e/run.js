@@ -5,7 +5,7 @@ const fs = require("fs");
 const https = require("https");
 const { execSync } = require("child_process");
 const { chromium } = require("playwright");
-const { createRelay } = require("../server.js");
+const { createRelay } = require("../lib/relay.js");
 
 // Usage: CHROME=/path/to/chrome node e2e/run.js   (needs ffmpeg + openssl for fixtures)
 const EXT = path.resolve(__dirname, "../extension");

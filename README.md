@@ -100,7 +100,8 @@ extension/
     adapters/
       registry.js        adapter interface + default <video> controls
       youtube.js         YouTube adapter
-server.js                the relay (Node + ws), deployable from the repo root
+server.js                entry point (what the host runs)
+lib/relay.js             the relay (Node + ws)
 test/                    unit tests: `npm test`
 e2e/
   run.js                 two real Chrome profiles + fake YouTube page + relay
