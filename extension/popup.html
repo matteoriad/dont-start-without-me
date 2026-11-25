@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Don't Start Without Me</h1>
+      <p class="tagline">Same scene, different countries.</p>
+    </header>
+
+    <section id="join-view" hidden>
+      <label>
+        Your name
+        <input id="name" maxlength="40" placeholder="So they know who paused" />
+      </label>
+      <label>
+        Room code
+        <div class="row">
+          <input id="room" maxlength="32" placeholder="e.g. nile-spree-42" />
+          <button id="dice" class="icon" title="Make one up for me">🎲</button>
+        </div>
+      </label>
+      <details>
+        <summary>Server</summary>
+        <input id="server" placeholder="ws://localhost:8787" />
+        <p class="hint">Both of you need the same server. See the README for a free one.</p>
+      </details>
+      <button id="join" class="primary">Start / join party in this tab</button>
+      <p id="join-hint" class="hint"></p>
+    </section>
+
+    <section id="party-view" hidden>
+      <div class="room">
+        <span>Room</span>
+        <code id="room-code"></code>
+        <button id="copy" class="icon" title="Copy room code">📋</button>
+      </div>
+      <p id="status"></p>
+      <ul id="peers"></ul>
+      <button id="leave">Leave party</button>
+    </section>
+
+    <p id="error" class="error"></p>
+    <script src="popup.js"></script>
+  </body>
+</html>

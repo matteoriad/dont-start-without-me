@@ -1,0 +1,18 @@
+{
+  "name": "dont-start-without-me-relay",
+  "version": "0.1.0",
+  "description": "Tiny WebSocket relay for Don't Start Without Me watch parties",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}
