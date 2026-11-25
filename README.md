@@ -63,8 +63,8 @@ npm install && npm start                 # relay on http://localhost:8787
 ```
 
 `chrome://extensions` → *Developer mode* → *Load unpacked* → `extension/`.
-Use two Chrome profiles to be both people. (`config.js` points at
-localhost by default; the popup's *Advanced* field overrides it.)
+Use two Chrome profiles to be both people. To use your local relay instead of
+the built-in one, enter `http://localhost:8787` in the popup's *Advanced* field.
 
 ## How the sync works
 
