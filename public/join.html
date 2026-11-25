@@ -296,6 +296,7 @@
         cursor: pointer;
       }
       .link:hover { color: #fff; }
+      a.btn { display: inline-block; text-decoration: none; }
       .small { margin-top: 14px; font-size: 13px; color: var(--muted); }
       .steps {
         margin: 0 auto 20px;
@@ -424,7 +425,8 @@
       <div id="v-joined" hidden>
         <div class="spinner"></div>
         <h2>You're in.</h2>
-        <p id="joined-msg">Opening <span class="host-name">their</span> movie in this tab…</p>
+        <p id="joined-msg">Opening what <span class="host-name">they're</span> watching…</p>
+        <a class="btn" id="open-now" hidden>Open it now</a>
       </div>
 
       <!-- 5. party over -->
@@ -500,6 +502,26 @@
         refresh();
         setInterval(refresh, 2500);
 
+        // ---- after joining: say what's happening while the tab switches ----
+        let joinedAt = 0;
+        function updateJoined() {
+          if (current !== "v-joined" || !room || !room.exists) return;
+          const host = room.hostName || "Your host";
+          if (room.mediaUrl) {
+            $("joined-msg").textContent = `Opening what ${host} is watching…`;
+            // The extension switches this tab by itself. If that hasn't happened
+            // after a few seconds, offer a manual way.
+            if (Date.now() - joinedAt > 6000) {
+              $("open-now").href = room.mediaUrl;
+              $("open-now").hidden = false;
+              $("joined-msg").textContent = `Taking a while. Open what ${host} is watching yourself:`;
+            }
+          } else {
+            $("joined-msg").textContent = `Waiting for ${host} to pick something. This tab jumps there as soon as they do.`;
+          }
+        }
+        setInterval(updateJoined, 1000);
+
         // ---- talk to the extension (its content script answers on this page) ----
         let ext = null;
         document.addEventListener("dswm-ready", (e) => {
@@ -519,6 +541,8 @@
           } catch {}
           if (r.ok) {
             show("v-joined");
+            joinedAt = Date.now();
+            updateJoined();
           } else {
             show("v-join");
             $("join").disabled = false;

@@ -61,8 +61,11 @@ const APPLE_PAGE = `<!doctype html><html><body>
 <script>
   customElements.define("apple-tv-plus-player", class extends HTMLElement {
     connectedCallback() {
-      const root = this.attachShadow({ mode: "open" });
+      // Closed, so ordinary page code (and the test) can't look inside; only
+      // extensions can, via chrome.dom.openOrClosedShadowRoot.
+      const root = this.attachShadow({ mode: "closed" });
       root.innerHTML = '<div class="wrapper"><video src="/video.mp4" muted playsinline width="320"></video></div>';
+      window.__appleVideo = root.querySelector("video"); // test-only handle
     }
   });
 </script>
@@ -231,14 +234,14 @@ async function main() {
   check("Netflix: extension seeked through Netflix's player", nf[0].api + nf[1].api >= 4);
 
   // Apple TV: video in shadow DOM, different country URLs.
-  const atGetVideo = '() => document.querySelector("apple-tv-plus-player").shadowRoot.querySelector("video")';
+  const atGetVideo = "() => window.__appleVideo";
   await runSite({
     label: "Apple TV",
     urlA: "https://tv.apple.com/de/movie/some-film/umc.cmc.5abc123def",
     urlB: "https://tv.apple.com/eg/movie/some-film/umc.cmc.5abc123def",
     room: "at-room",
     getVideo: atGetVideo,
-    userSeek: (t) => (document.querySelector("apple-tv-plus-player").shadowRoot.querySelector("video").currentTime = t),
+    userSeek: (t) => (window.__appleVideo.currentTime = t),
   });
 
   web.close();

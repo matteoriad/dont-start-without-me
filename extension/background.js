@@ -122,7 +122,8 @@ function handleServer(msg) {
       hostId = msg.hostId || null;
       peers = msg.peers || [];
       lastState = msg.state;
-      if (msg.state) maybeFollow(msg.state);
+      if (msg.where) maybeFollow(msg.where);
+      else if (msg.state) maybeFollow(msg.state);
       break;
     case "presence":
       peers = msg.peers || [];
@@ -130,6 +131,9 @@ function handleServer(msg) {
       break;
     case "state":
       lastState = msg;
+      maybeFollow(msg);
+      break;
+    case "where":
       maybeFollow(msg);
       break;
     case "error":
@@ -160,6 +164,53 @@ async function maybeFollow(state) {
   }
 }
 
+// ---------------------------------------------------------------- content scripts
+
+// After the extension is installed or updated, tabs that were already open
+// still run the old copy (or none), cut off from us. Put fresh copies in.
+async function injectContent(tabId, url) {
+  const scripts = chrome.runtime.getManifest().content_scripts || [];
+  for (const cs of scripts) {
+    if (cs.js.includes("content/invite.js")) continue;
+    if (!cs.matches.some((pattern) => matchPattern(pattern, url))) continue;
+    await chrome.scripting.executeScript({ target: { tabId }, files: cs.js, world: cs.world || "ISOLATED" }).catch(() => {});
+  }
+}
+
+function matchPattern(pattern, url) {
+  const re = new RegExp("^" + pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+  return re.test(url);
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  for (const t of tabs) if (t.url && SUPPORTED_RE.test(t.url)) injectContent(t.id, t.url);
+});
+
+// Tell a tab it's the party tab; if nobody answers there, inject and retry.
+async function activateTab(tabId) {
+  const message = { type: "party", active: true, offset, follow: Boolean(party && party.follow) };
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+    return true;
+  } catch {}
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    return false;
+  }
+  if (!SUPPORTED_RE.test(tab.url || "")) return false; // e.g. invite page / blank tab: we navigate it instead
+  await injectContent(tabId, tab.url);
+  await new Promise((r) => setTimeout(r, 300));
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function toTab(message) {
   if (party && party.tabId != null) chrome.tabs.sendMessage(party.tabId, message).catch(() => {});
 }
@@ -181,12 +232,7 @@ async function join({ room, name, serverUrl, tabId, follow }) {
   await chrome.storage.local.set({ name: party.name, room, serverUrl: serverUrl && serverUrl !== DEFAULT_SERVER ? serverUrl : "" });
   status = "connecting";
   connect();
-  let tabReady = true;
-  try {
-    await chrome.tabs.sendMessage(tabId, { type: "party", active: true, offset, follow: party.follow });
-  } catch {
-    tabReady = false; // content script not injected yet (tab opened before install)
-  }
+  const tabReady = await activateTab(tabId);
   return { ok: true, tabReady };
 }
 
@@ -279,6 +325,8 @@ chrome.runtime.onMessage.addListener((m, sender, sendResponse) => {
       default:
         return null;
     }
-  })().then(sendResponse);
+  })()
+    .catch((e) => ({ ok: false, error: `Something went wrong: ${e && e.message ? e.message : e}` }))
+    .then(sendResponse);
   return true; // async response
 });

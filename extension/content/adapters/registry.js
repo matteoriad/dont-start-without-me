@@ -15,17 +15,26 @@
 //                        Defaults to DSWM.videoControls(video).
 (function () {
   const DSWM = (window.DSWM = window.DSWM || {});
-  DSWM.adapters = DSWM.adapters || [];
+  // Fresh list on every injection (the extension may re-inject after an update).
+  DSWM.adapters = [];
 
   DSWM.registerAdapter = (adapter) => DSWM.adapters.push(adapter);
 
   DSWM.findAdapter = () => DSWM.adapters.find((a) => a.matches(window.location)) || null;
 
-  // querySelectorAll that also looks inside (open) shadow roots.
+  // querySelectorAll that also looks inside shadow roots — including closed
+  // ones, which only extensions can open (chrome.dom.openOrClosedShadowRoot).
+  function shadowOf(el) {
+    try {
+      if (chrome.dom && chrome.dom.openOrClosedShadowRoot) return chrome.dom.openOrClosedShadowRoot(el);
+    } catch {}
+    return el.shadowRoot;
+  }
   DSWM.deepQueryAll = (selector, root = document) => {
     const out = [...root.querySelectorAll(selector)];
     for (const el of root.querySelectorAll("*")) {
-      if (el.shadowRoot) out.push(...DSWM.deepQueryAll(selector, el.shadowRoot));
+      const sr = shadowOf(el);
+      if (sr) out.push(...DSWM.deepQueryAll(selector, sr));
     }
     return out;
   };

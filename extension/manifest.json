@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Don't Start Without Me",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Watch together, in sync, from different countries. YouTube, Netflix and Apple TV.",
   "minimum_chrome_version": "116",
   "permissions": [
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://www.youtube.com/*",

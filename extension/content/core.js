@@ -9,8 +9,19 @@
 //   An ad later on pauses everyone else until it's over.
 (() => {
   const DSWM = window.DSWM;
-  if (!DSWM || DSWM.coreStarted) return;
-  DSWM.coreStarted = true;
+  if (!DSWM) return;
+  // After an extension update, an older copy of this script may still be on
+  // the page but cut off from the extension. Only stop if a *live* copy runs.
+  if (DSWM.coreAlive && DSWM.coreAlive()) return;
+  const alive = () => {
+    try {
+      return Boolean(chrome.runtime && chrome.runtime.id);
+    } catch {
+      return false;
+    }
+  };
+  DSWM.coreAlive = alive;
+  document.querySelectorAll("#dswm-root").forEach((el) => el.remove()); // stale UI from an old copy
 
   const adapter = DSWM.findAdapter();
   if (!adapter) return;
@@ -42,6 +53,8 @@
   let synced = false; // joined and lined up with the host at least once
   let helloPending = false; // host owes a newcomer a sync
   let followPending = false; // just joined: go to whatever the host is watching
+  let announcedMedia = undefined; // what the host last told the room it has open
+  let lastSwitchToast = 0;
 
   let inAd = false;
   let adAnnounced = false;
@@ -198,12 +211,30 @@
   }
 
   function send(msg) {
-    chrome.runtime.sendMessage({ type: "send", msg }).catch(() => {});
+    if (!alive()) return;
+    try {
+      chrome.runtime.sendMessage({ type: "send", msg }).catch(() => {});
+    } catch {}
   }
 
   function stopNudge() {
     if (nudging && controls) controls.setRate(1);
     nudging = false;
+  }
+
+  // The host tells the room what it has open, even before pressing play, so
+  // joiners can open the same thing and the invite page can show it.
+  function announceWhere(force) {
+    if (!active || !isHost()) return;
+    const mediaId = adapter.getMediaId();
+    if (!mediaId || (!force && mediaId === announcedMedia)) return;
+    announcedMedia = mediaId;
+    send({
+      type: "where",
+      mediaId,
+      mediaUrl: adapter.getMediaUrl(),
+      mediaTitle: adapter.getTitle ? adapter.getTitle() : null,
+    });
   }
 
   function trySendHello() {
@@ -318,6 +349,27 @@
     }
   }
 
+  function handleWhere(msg) {
+    if (!active || msg.from === myId || !msg.mediaUrl) return;
+    const mine = adapter.getMediaId();
+    if (mine && mine === msg.mediaId) {
+      followPending = false;
+      return;
+    }
+    if (followPending) {
+      followPending = false;
+      window.location.href = msg.mediaUrl;
+      return;
+    }
+    if (msg.from === hostId && Date.now() - lastSwitchToast > 5000) {
+      lastSwitchToast = Date.now();
+      ui.toast(`${msg.fromName || "The host"} switched to something else.`, {
+        label: "Join them",
+        onClick: () => (window.location.href = msg.mediaUrl),
+      });
+    }
+  }
+
   function resumeIfAdsDone(name) {
     if (adPeers.size > 0 || !pausedForAd) return;
     pausedForAd = false;
@@ -368,14 +420,22 @@
         synced = isHost();
         // The host tells the room what's playing right away, so the invite page
         // can show it and joiners know where to go.
-        if (isHost()) helloPending = true;
+        if (isHost()) {
+          helloPending = true;
+          announceWhere(true);
+        } else if (msg.where) {
+          handleWhere(msg.where);
+        }
         updatePill();
         // Joiners wait for the host's "hello" rather than trusting old room state.
         break;
       case "presence":
         peers = msg.peers || [];
         if (msg.hostId) hostId = msg.hostId;
-        if (isHost()) synced = true;
+        if (isHost()) {
+          synced = true;
+          announceWhere(false); // e.g. we just became host
+        }
         updatePill();
         if (msg.event === "joined") {
           ui.toast(`${msg.who} joined. Now you can start.`);
@@ -394,6 +454,9 @@
       case "ad":
         handleAd(msg);
         break;
+      case "where":
+        handleWhere(msg);
+        break;
       case "error":
         ui.toast(`Hmm: ${msg.error}`);
         break;
@@ -406,6 +469,7 @@
     synced = false;
     helloPending = false;
     followPending = false;
+    announcedMedia = undefined;
     adAnnounced = false;
     adPeers.clear();
     pausedForAd = false;
@@ -420,7 +484,10 @@
     if (info.peers) peers = info.peers;
     if (typeof info.follow === "boolean") followPending = info.follow;
     if (!active) reset();
-    if (active && isHost()) synced = true;
+    if (active && isHost()) {
+      synced = true;
+      announceWhere(true);
+    }
     updatePill();
     // After a page reload mid-party, catch up with the latest known state.
     if (active && !wasActive && info.state && !isHost()) applyRemote(info.state);
@@ -442,6 +509,7 @@
       if (active) onOwnAd(ad);
     }
     if (!active) return;
+    announceWhere(false);
     if (pendingRemote && controls && adapter.isReady()) {
       const m = pendingRemote;
       pendingRemote = null;

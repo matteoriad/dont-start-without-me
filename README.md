@@ -89,6 +89,12 @@ the built-in one, enter `http://localhost:8787` in the popup's *Advanced* field.
     them…") and they continue automatically when it's over
 - **Different videos:** if your partner is watching something else, you get a
   "Join them" button instead of a hijacked player.
+- **Where the host is:** the host's tab tells the room what it has open as
+  soon as the party starts and whenever it changes, even before anyone
+  presses play. Joiners' tabs go there; if the host switches title, the
+  others get a "Join them" button.
+- **After an update:** the extension puts fresh copies of itself into tabs
+  that were already open, so nobody has to reload their video tab.
 - **Connection:** WebSocket if possible, otherwise HTTP long-polling.
 - **Clocks:** the background worker pings the relay (NTP-style, lowest
   round-trip wins) so "playing at 12:34, sent at T" means the same thing on
@@ -153,6 +159,7 @@ cd e2e && npm install && npm test          # full browser test (needs Chrome, ff
 cd e2e && HTTP_ONLY=1 npm test             # same, with WebSockets blocked
 node e2e/sites.js                          # Netflix + Apple TV adapters against mock pages
 node e2e/invite.js                         # names, invite page, joining from any tab
+node e2e/robust.js                         # host picks a video after inviting; re-injection
 ```
 
 The e2e test maps `www.youtube.com` to a local HTTPS page with a test video,

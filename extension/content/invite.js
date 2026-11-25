@@ -29,6 +29,7 @@
     } catch {
       res = { ok: false, error: "The extension didn't answer. Reload the page and try again." };
     }
-    document.dispatchEvent(new CustomEvent("dswm-joined", { detail: JSON.stringify(res || { ok: false }) }));
+    if (!res) res = { ok: false, error: "The extension didn't answer. Reload this page and try again." };
+    document.dispatchEvent(new CustomEvent("dswm-joined", { detail: JSON.stringify(res) }));
   });
 })();
