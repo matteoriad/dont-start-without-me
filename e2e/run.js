@@ -19,7 +19,7 @@ const SERVER_URL = "http://relay.test:8787";
 function fixtures() {
   fs.mkdirSync(FIX, { recursive: true });
   if (!fs.existsSync(path.join(FIX, "video.mp4"))) {
-    execSync(`ffmpeg -loglevel error -y -f lavfi -i testsrc=duration=120:size=320x180:rate=25 -c:v libx264 -pix_fmt yuv420p -movflags +faststart "${FIX}/video.mp4"`);
+    execSync(`ffmpeg -loglevel error -y -f lavfi -i testsrc=duration=300:size=320x180:rate=25 -c:v libx264 -pix_fmt yuv420p -movflags +faststart "${FIX}/video.mp4"`);
   }
   if (!fs.existsSync(path.join(FIX, "cert.pem"))) {
     execSync(`openssl req -x509 -newkey rsa:2048 -nodes -keyout "${FIX}/key.pem" -out "${FIX}/cert.pem" -days 30 -subj "/CN=www.youtube.com"`, { stdio: "ignore" });
@@ -76,96 +76,153 @@ async function main() {
     });
     const page = await ctx.newPage();
     page.on("console", (m) => m.type() === "error" && console.log(`[${name} console]`, m.text()));
+    // Keep every toast the extension shows, since they fade after a few seconds.
+    await page.addInitScript(() => {
+      window.__toasts = [];
+      new MutationObserver((muts) => {
+        for (const m of muts)
+          for (const n of m.addedNodes)
+            if (n.parentElement && n.parentElement.id === "dswm-root") window.__toasts.push(n.textContent);
+      }).observe(document, { childList: true, subtree: true });
+    });
     await page.goto("https://www.youtube.com/watch?v=abc123");
     let sw = ctx.serviceWorkers()[0];
     if (!sw) sw = await ctx.waitForEvent("serviceworker");
     return { ctx, page, sw, name };
   }
 
-  const A = await launch("A");
-  const B = await launch("B");
-  await sleep(1500);
+  const A = await launch("A"); // Matteo, the host
+  const B = await launch("B"); // Yasso, joins later
+  await sleep(1000);
 
-  for (const p of [A, B]) {
-    const res = await p.sw.evaluate(async ([name, serverUrl]) => {
-      const [t] = await chrome.tabs.query({ url: "https://www.youtube.com/*" });
-      return join({ room: "e2e-room", name, serverUrl, tabId: t.id });
-    }, [p.name === "A" ? "Matteo" : "Yasso", SERVER_URL]);
-    console.log(p.name, "join ->", JSON.stringify(res));
-  }
-  await sleep(HTTP_ONLY ? 7000 : 2000); // HTTP mode first tries the WebSocket for up to 4 s
-
-  const kinds = await Promise.all([A, B].map((p) => p.sw.evaluate(() => (conn ? conn.kind : null))));
-  console.log("transports:", kinds.join(", "));
+  const join = (p, name) =>
+    p.sw.evaluate(
+      async ([name, serverUrl]) => {
+        const [t] = await chrome.tabs.query({ url: "https://www.youtube.com/*" });
+        return join({ room: "e2e-room", name, serverUrl, tabId: t.id });
+      },
+      [name, SERVER_URL],
+    );
+  const leave = (p) => p.sw.evaluate(() => leave());
+  const transport = (p) => p.sw.evaluate(() => (conn ? conn.kind : null));
 
   const v = (p) =>
     p.page.evaluate(() => {
       const el = document.querySelector("video");
       return { t: +el.currentTime.toFixed(2), paused: el.paused, rate: el.playbackRate };
     });
-  const toasts = (p) => p.page.evaluate(() => document.querySelector("#dswm-root")?.innerText || "");
+  const toasts = (p) =>
+    p.page.evaluate(() => [document.querySelector("#dswm-root")?.innerText || "", ...(window.__toasts || [])].join("\n"));
+  // Something the person really did: a trusted click on the player, then the action.
+  const user = async (p, fn) => {
+    await p.page.click("video");
+    await p.page.evaluate(fn);
+  };
+  // Something the player did by itself (autoplay, ad ending, …): no click.
+  const auto = (p, fn) => p.page.evaluate(fn);
+  const setAd = (p, on) => auto(p, (on) => document.querySelector("#movie_player").classList.toggle("ad-showing", on), on);
   const report = async (label) => {
     const [a, b] = await Promise.all([v(A), v(B)]);
-    console.log(`${label}: A=${JSON.stringify(a)} B=${JSON.stringify(b)} diff=${Math.abs(a.t - b.t).toFixed(2)}`);
-    return { a, b, diff: Math.abs(a.t - b.t) };
+    const diff = Math.abs(a.t - b.t);
+    console.log(`  ${label}: A=${JSON.stringify(a)} B=${JSON.stringify(b)} diff=${diff.toFixed(2)}`);
+    return { a, b, diff };
   };
   const results = [];
   const check = (name, ok) => {
     results.push([name, ok]);
     console.log(ok ? "PASS" : "FAIL", name);
   };
+  const joinWait = HTTP_ONLY ? 6500 : 2000; // HTTP mode first tries the WebSocket
 
-  check(`using ${HTTP_ONLY ? "http" : "ws"} transport`, kinds.every((k) => k === (HTTP_ONLY ? "http" : "ws")));
-  console.log("pill B:", JSON.stringify(await toasts(B)));
-  check("pill shows partner", (await toasts(B)).includes("Watching with Matteo"));
+  // 1. Matteo starts a party alone and watches to 40 s.
+  await join(A, "Matteo");
+  await sleep(joinWait);
+  await user(A, () => {
+    const el = document.querySelector("video");
+    el.currentTime = 40;
+    return el.play();
+  });
+  // Yasso's player autoplays from the start before she joins.
+  await auto(B, () => document.querySelector("video").play());
+  await sleep(2000);
 
-  // 1. A presses play
-  await A.page.evaluate(() => document.querySelector("video").play());
+  // 2. Yasso joins mid-video.
+  await join(B, "Yasso");
+  await sleep(joinWait + 1000);
+  check(`transport is ${HTTP_ONLY ? "http" : "ws"}`, (await Promise.all([transport(A), transport(B)])).every((k) => k === (HTTP_ONLY ? "http" : "ws")));
+  let r = await report("after Yasso joined");
+  check("host was NOT restarted by the joiner", r.a.t > 42 && !r.a.paused);
+  check("joiner jumped to the host", r.diff < 0.5 && !r.b.paused);
+  check("joiner saw 'Synced with Matteo'", (await toasts(B)).includes("Synced with Matteo"));
+  check("host pill says host", (await toasts(A)).includes("you're the host"));
+
+  // 3. Yasso's player jumps on its own (no click) — must not affect Matteo; heartbeat pulls her back.
+  await auto(B, () => (document.querySelector("video").currentTime = 3));
+  await sleep(500);
+  r = await report("after B's player jumped by itself");
+  check("automatic jump not shared", r.a.t > 45);
+  await sleep(4500);
+  r = await report("after heartbeat");
+  check("joiner pulled back to host", r.diff < 0.5);
+
+  // 4. Yasso really pauses and plays → Matteo follows.
+  await user(B, () => document.querySelector("video").pause());
+  await sleep(1500);
+  r = await report("after Yasso paused");
+  check("host paused by joiner's click", r.a.paused && r.diff < 0.3);
+  check("pause toast", (await toasts(A)).includes("Yasso paused"));
+  await user(B, () => document.querySelector("video").play());
+  await sleep(1500);
+  r = await report("after Yasso played");
+  check("host resumed by joiner's click", !r.a.paused && r.diff < 0.5);
+
+  // 5. Mid-video ad for Yasso → Matteo waits, then both continue.
+  await sleep(1000);
+  await setAd(B, true);
+  await sleep(1200);
+  r = await report("during Yasso's ad");
+  check("host paused for the joiner's ad", r.a.paused);
+  check("host told about the ad", (await toasts(A)).includes("Yasso got an ad"));
+  await sleep(2500);
+  check("host still waiting during the ad", (await v(A)).paused);
+  await setAd(B, false);
+  await sleep(1500);
+  r = await report("after Yasso's ad");
+  check("host resumed after the ad", !r.a.paused);
+  check("host told the ad is over", (await toasts(A)).includes("ad is over"));
   await sleep(3000);
-  let r = await report("after A play");
-  check("B started playing", !r.b.paused);
-  check("in sync after play (<0.5s)", r.diff < 0.5);
+  r = await report("settled after ad");
+  check("in sync after the ad", r.diff < 0.5);
 
-  // 2. A seeks
-  await A.page.evaluate(() => (document.querySelector("video").currentTime = 60));
-  await sleep(2500);
-  r = await report("after A seek to 60");
-  check("B followed seek", r.b.t > 58 && r.diff < 0.6);
+  // 6. Yasso leaves and rejoins while an ad is showing → nobody pauses.
+  await leave(B);
+  await sleep(1000);
+  await setAd(B, true);
+  await join(B, "Yasso");
+  await sleep(joinWait + 1500);
+  r = await report("Yasso rejoined during an ad");
+  check("host NOT paused by a join-time ad", !r.a.paused);
+  await setAd(B, false);
+  await sleep(3000);
+  r = await report("after join-time ad ended");
+  check("joiner caught up after the join-time ad", r.diff < 0.5 && !r.b.paused);
 
-  // 3. B pauses
-  await B.page.evaluate(() => document.querySelector("video").pause());
+  // 7. Drift: Yasso's player runs fast for a bit; heartbeat nudges her back.
+  await auto(B, () => (document.querySelector("video").playbackRate = 1.4));
   await sleep(2000);
-  r = await report("after B pause");
-  check("A paused", r.a.paused);
-  check("paused at same position (<0.3s)", r.diff < 0.3);
-  const ta = await toasts(A);
-  console.log("A toasts:", JSON.stringify(ta));
-  check("A got a pause toast from Yasso", ta.includes("Yasso paused"));
-
-  // 4. B plays, then we artificially make A drift ahead by 0.8s; heartbeat should nudge it back
-  await B.page.evaluate(() => document.querySelector("video").play());
-  await sleep(2500);
-  // Drift without firing a user seek: speed A up for a bit (ratechange isn't synced)
-  await A.page.evaluate(() => (document.querySelector("video").playbackRate = 1.4));
-  await sleep(2000);
-  r = await report("after making A drift");
-  let maxDiff = 0;
-  for (let i = 0; i < 12; i++) {
+  let last;
+  for (let i = 0; i < 13; i++) {
     await sleep(1000);
-    r = await report(`  correcting ${i}`);
-    maxDiff = r.diff;
+    last = await report(`correcting ${i}`);
   }
-  check("drift corrected (<0.3s)", maxDiff < 0.3);
-  check("rates back to ~1", Math.abs(r.a.rate - 1) < 0.001);
+  check("drift corrected", last.diff < 0.3 && Math.abs(last.b.rate - 1) <= 0.03);
 
-  // 5. B goes to a different video; A's next action should show a mismatch toast on B
+  // 8. Different video → "Join them".
   await B.page.goto("https://www.youtube.com/watch?v=other999");
   await sleep(2500);
-  await A.page.evaluate(() => document.querySelector("video").pause());
+  await user(A, () => document.querySelector("video").pause());
   await sleep(1500);
-  const tb = await toasts(B);
-  console.log("B toasts:", JSON.stringify(tb));
-  check("B told partner is watching something else", tb.includes("watching something else"));
+  check("joiner offered to join the other video", (await toasts(B)).includes("watching something else"));
 
   await A.ctx.close();
   await B.ctx.close();

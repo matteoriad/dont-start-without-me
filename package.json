@@ -1,6 +1,6 @@
 {
   "name": "dont-start-without-me",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Relay server for the Don't Start Without Me watch-party Chrome extension",
   "main": "server.js",
   "type": "commonjs",

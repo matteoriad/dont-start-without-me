@@ -1,8 +1,12 @@
 // Core sync engine. Site-agnostic: everything site-specific lives in an adapter.
 //
-// Model: whoever acted last (play/pause/seek) is the "leader". The leader sends
-// a heartbeat every couple of seconds while playing; everyone else corrects
-// drift towards it (small drift: nudge playback speed, big drift: seek).
+// Rules:
+// - The host (whoever opened the room) is the source of truth. Joiners jump
+//   to the host, and only the host sends drift-correction heartbeats.
+// - Only things a person actually did (click / key press) are shared.
+//   Autoplay, ads ending, players loading etc. are never broadcast.
+// - Ads: an ad while you're still joining is ignored (you catch up after).
+//   An ad later on pauses everyone else until it's over.
 (() => {
   const DSWM = window.DSWM;
   if (!DSWM || DSWM.coreStarted) return;
@@ -13,29 +17,54 @@
   const math = DSWM.math;
 
   const HEARTBEAT_MS = 2000;
-  const TICK_MS = 500;
+  const TICK_MS = 300;
   // After we apply a remote command, the resulting play/pause/seeked events
   // are ours, not the user's. Ignore local events for this long.
   const SUPPRESS_MS = 1500;
+  // A play/pause/seek only counts as the user's if they clicked or pressed a
+  // key this recently.
+  const GESTURE_WINDOW_MS = 2000;
   const MISMATCH_TOAST_EVERY_MS = 15000;
 
   let active = false;
   let offset = 0; // serverTime - Date.now(), in ms
   let myId = null;
+  let hostId = null;
   let peers = [];
-  let leaderId = null;
 
   let video = null;
   let controls = null;
   let suppressUntil = 0;
+  let lastGestureAt = 0;
   let nudging = false;
   let pendingRemote = null;
   let lastMismatchToast = 0;
+  let synced = false; // joined and lined up with the host at least once
+  let helloPending = false; // host owes a newcomer a sync
+
+  let inAd = false;
+  let adAnnounced = false;
+  const adPeers = new Map(); // id -> name of people currently watching an ad
+  let pausedForAd = false;
 
   const serverNow = () => Date.now() + offset;
   const suppressed = () => Date.now() < suppressUntil;
   const suppress = () => (suppressUntil = Date.now() + SUPPRESS_MS);
+  const userActed = () => Date.now() - lastGestureAt < GESTURE_WINDOW_MS;
+  const isHost = () => Boolean(myId) && hostId === myId;
+  const othersHere = () => peers.some((p) => p.id !== myId);
+  const nameOf = (id) => (peers.find((p) => p.id === id) || {}).name || "Your partner";
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+  for (const type of ["pointerdown", "pointerup", "keydown", "keyup"]) {
+    window.addEventListener(
+      type,
+      (e) => {
+        if (e.isTrusted) lastGestureAt = Date.now();
+      },
+      true,
+    );
+  }
 
   // ---------------------------------------------------------------- UI
 
@@ -113,13 +142,15 @@
   function updatePill() {
     if (!active) return ui.setPill(null);
     const others = peers.filter((p) => p.id !== myId).map((p) => p.name);
-    ui.setPill(others.length ? `🍿 Watching with ${others.join(", ")}` : "🍿 Waiting for your partner… don't start without them");
+    if (!others.length) return ui.setPill("🍿 Waiting for your partner… don't start without them");
+    ui.setPill(`🍿 Watching with ${others.join(", ")}${isHost() ? " · you're the host" : ""}`);
   }
 
   // ---------------------------------------------------------------- video binding
 
   function onLocal(reason) {
-    if (!active || !controls || suppressed() || !adapter.isReady()) return;
+    if (!active || !controls || suppressed() || !adapter.isReady() || !userActed()) return;
+    if (reason === "play") pausedForAd = false; // they chose to carry on
     broadcast(reason);
   }
   const onPlay = () => onLocal("play");
@@ -160,7 +191,6 @@
 
   function broadcast(reason) {
     if (!controls) return;
-    leaderId = myId;
     stopNudge();
     send(snapshot(reason));
   }
@@ -172,6 +202,13 @@
   function stopNudge() {
     if (nudging && controls) controls.setRate(1);
     nudging = false;
+  }
+
+  function trySendHello() {
+    if (helloPending && isHost() && controls && adapter.isReady()) {
+      helloPending = false;
+      broadcast("hello");
+    }
   }
 
   // ---------------------------------------------------------------- receiving
@@ -201,6 +238,8 @@
 
   function applyRemote(msg) {
     if (!active || msg.from === myId) return;
+    // Only the host corrects drift.
+    if (msg.reason === "heartbeat" && msg.from !== hostId) return;
     const name = msg.fromName || "Your partner";
 
     const mine = adapter.getMediaId();
@@ -220,12 +259,15 @@
       return;
     }
 
-    leaderId = msg.from;
+    synced = true;
     const target = math.expectedPosition(msg, serverNow());
     const local = controls.getTime();
     const isHeartbeat = msg.reason === "heartbeat";
 
-    if (msg.playing && controls.isPaused()) {
+    // While we're holding for someone's ad, don't let a heartbeat restart us.
+    const wantPlaying = msg.playing && !(isHeartbeat && pausedForAd);
+
+    if (wantPlaying && controls.isPaused()) {
       suppress();
       controls.play();
     } else if (!msg.playing && !controls.isPaused()) {
@@ -265,27 +307,78 @@
     }
   }
 
+  function resumeIfAdsDone(name) {
+    if (adPeers.size > 0 || !pausedForAd) return;
+    pausedForAd = false;
+    if (controls && controls.isPaused()) {
+      suppress();
+      controls.play();
+    }
+    if (name) ui.toast(`${name}'s ad is over. Back to it.`);
+  }
+
+  function handleAd(msg) {
+    const name = msg.fromName || nameOf(msg.from);
+    if (msg.active) {
+      adPeers.set(msg.from, name);
+      ui.toast(`${name} got an ad. Waiting for them…`);
+      if (controls && !controls.isPaused()) {
+        suppress();
+        controls.pause();
+        pausedForAd = true;
+      }
+    } else {
+      adPeers.delete(msg.from);
+      resumeIfAdsDone(name);
+    }
+  }
+
+  // Our own ad started or ended.
+  function onOwnAd(nowInAd) {
+    if (nowInAd) {
+      // An ad while still joining doesn't hold anyone up; we catch up after.
+      if (synced && othersHere()) {
+        adAnnounced = true;
+        send({ type: "ad", active: true });
+        ui.toast("Ad break. The others are waiting for you.");
+      }
+    } else if (adAnnounced) {
+      adAnnounced = false;
+      send({ type: "ad", active: false });
+    }
+  }
+
   function handleServer(msg) {
     switch (msg.type) {
       case "joined":
         myId = msg.you;
+        hostId = msg.hostId || null;
         peers = msg.peers || [];
+        synced = isHost();
         updatePill();
-        if (msg.state) applyRemote(msg.state);
+        // Joiners wait for the host's "hello" rather than trusting old room state.
         break;
       case "presence":
         peers = msg.peers || [];
+        if (msg.hostId) hostId = msg.hostId;
+        if (isHost()) synced = true;
         updatePill();
         if (msg.event === "joined") {
           ui.toast(`${msg.who} joined. Now you can start.`);
-          // Bring the newcomer up to speed — only one person needs to do this.
-          if ((leaderId === null || leaderId === myId) && controls && adapter.isReady()) broadcast("hello");
+          if (isHost()) {
+            helloPending = true; // bring the newcomer to where we are
+            trySendHello();
+          }
         } else if (msg.event === "left") {
           ui.toast(`${msg.who} left. Rude.`);
+          if (msg.whoId && adPeers.delete(msg.whoId)) resumeIfAdsDone(null);
         }
         break;
       case "state":
         applyRemote(msg);
+        break;
+      case "ad":
+        handleAd(msg);
         break;
       case "error":
         ui.toast(`Hmm: ${msg.error}`);
@@ -293,19 +386,28 @@
     }
   }
 
+  function reset() {
+    stopNudge();
+    pendingRemote = null;
+    synced = false;
+    helloPending = false;
+    adAnnounced = false;
+    adPeers.clear();
+    pausedForAd = false;
+  }
+
   function setParty(info) {
     const wasActive = active;
     active = Boolean(info.active);
     if (typeof info.offset === "number") offset = info.offset;
     if (info.myId) myId = info.myId;
+    if (info.hostId) hostId = info.hostId;
     if (info.peers) peers = info.peers;
-    if (!active) {
-      stopNudge();
-      pendingRemote = null;
-      leaderId = null;
-    }
+    if (!active) reset();
+    if (active && isHost()) synced = true;
     updatePill();
-    if (active && !wasActive && info.state) applyRemote(info.state);
+    // After a page reload mid-party, catch up with the latest known state.
+    if (active && !wasActive && info.state && !isHost()) applyRemote(info.state);
   }
 
   chrome.runtime.onMessage.addListener((m) => {
@@ -318,15 +420,22 @@
 
   setInterval(() => {
     bind();
-    if (active && pendingRemote && controls && adapter.isReady()) {
+    const ad = Boolean(adapter.isAd && adapter.isAd());
+    if (ad !== inAd) {
+      inAd = ad;
+      if (active) onOwnAd(ad);
+    }
+    if (!active) return;
+    if (pendingRemote && controls && adapter.isReady()) {
       const m = pendingRemote;
       pendingRemote = null;
       applyRemote(m);
     }
+    trySendHello();
   }, TICK_MS);
 
   setInterval(() => {
-    if (active && leaderId === myId && controls && adapter.isReady() && !controls.isPaused()) {
+    if (active && isHost() && othersHere() && controls && adapter.isReady() && !controls.isPaused()) {
       send(snapshot("heartbeat"));
     }
   }, HEARTBEAT_MS);

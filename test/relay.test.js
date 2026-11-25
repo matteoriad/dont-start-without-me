@@ -148,3 +148,34 @@ test("relay: HTTP-only mode refuses WebSockets but serves HTTP", async () => {
     await relay.close();
   }
 });
+
+test("relay: host is the room opener, passes on when they leave; ad messages relay", async () => {
+  const relay = createRelay({ port: 0, log: () => {} });
+  const port = await relay.listen();
+  try {
+    const a = client(port);
+    const b = client(port);
+    await Promise.all([a.open(), b.open()]);
+    a.send({ type: "join", room: "host-room", name: "Host" });
+    const aj = await a.next("joined");
+    assert.equal(aj.hostId, aj.you);
+    b.send({ type: "join", room: "host-room", name: "Guest" });
+    const bj = await b.next("joined");
+    assert.equal(bj.hostId, aj.you);
+    const pres = await a.next("presence");
+    assert.equal(pres.whoId, bj.you);
+
+    b.send({ type: "ad", active: true });
+    const ad = await a.next("ad");
+    assert.equal(ad.active, true);
+    assert.equal(ad.fromName, "Guest");
+
+    a.ws.close();
+    const left = await b.next("presence");
+    assert.equal(left.event, "left");
+    assert.equal(left.hostId, bj.you);
+    b.ws.close();
+  } finally {
+    await relay.close();
+  }
+});

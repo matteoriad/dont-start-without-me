@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Don't Start Without Me",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Watch together, in sync, from different countries. Currently supports YouTube.",
   "minimum_chrome_version": "116",
   "permissions": ["storage"],

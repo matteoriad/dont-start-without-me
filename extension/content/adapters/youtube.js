@@ -11,6 +11,11 @@
     return shorts ? shorts[1] : null;
   }
 
+  function isAdShowing() {
+    const player = document.querySelector("#movie_player");
+    return Boolean(player) && player.classList.contains("ad-showing");
+  }
+
   DSWM.registerAdapter({
     name: "YouTube",
 
@@ -28,9 +33,8 @@
     },
 
     // While an ad plays, the <video> element is playing the ad, not the video.
-    isReady: () => {
-      const player = document.querySelector("#movie_player");
-      return Boolean(player) && !player.classList.contains("ad-showing") && Boolean(videoId());
-    },
+    isAd: isAdShowing,
+
+    isReady: () => Boolean(document.querySelector("#movie_player")) && !isAdShowing() && Boolean(videoId()),
   });
 })();

@@ -68,22 +68,26 @@ the built-in one, enter `http://localhost:8787` in the popup's *Advanced* field.
 
 ## How the sync works
 
-- **Events:** play, pause and seek in the party tab are sent to the room.
-  Commands coming *from* the room are applied and their echo is suppressed,
-  so you don't ping-pong.
-- **Leader:** whoever acted last is the leader. While playing, the leader
-  sends a heartbeat every 2 s with its position.
-- **Drift correction:** everyone else compares against the heartbeat.
+- **The host is the source of truth.** Whoever starts the party is the host
+  (if they leave, the next person takes over). When someone joins, the host
+  sends them where it is and they jump there. Joining never moves the host.
+- **Only real actions are shared.** A play, pause or seek is sent to the
+  others only if the person clicked or pressed a key just before. Autoplay,
+  a player reloading or an ad ending is never broadcast.
+- **Drift correction:** while playing, the host sends a heartbeat every 2 s.
+  Everyone else compares against it:
   - more than 1.5 s apart → seek
   - 0.3 – 1.5 s → speed up / slow down slightly (max ±15%) until within 0.1 s
+- **Ads:**
+  - an ad while you're still joining holds nobody up; you catch up after it
+  - an ad later on pauses everyone else ("Yasso got an ad. Waiting for
+    them…") and they continue automatically when it's over
+- **Different videos:** if your partner is watching something else, you get a
+  "Join them" button instead of a hijacked player.
 - **Connection:** WebSocket if possible, otherwise HTTP long-polling.
 - **Clocks:** the background worker pings the relay (NTP-style, lowest
   round-trip wins) so "playing at 12:34, sent at T" means the same thing on
   both machines.
-- **Ads:** while YouTube shows an ad, that side neither sends nor applies
-  anything; it catches up afterwards.
-- **Different videos:** if your partner is watching something else, you get a
-  "Join them" button instead of a hijacked player.
 
 ## Project layout
 
@@ -120,6 +124,7 @@ with:
 | `getMediaId()` | id of what's playing, to detect "watching different things" |
 | `getMediaUrl()` | link the partner can open |
 | `isReady()` | `false` during ads / loading screens |
+| `isAd()` *(optional)* | `true` while an ad plays, so the party can wait |
 | `controls(video)` *(optional)* | custom `{play, pause, seek, getTime, isPaused, setRate}` for sites that break when you touch `<video>` directly |
 
 Then add the site to `host_permissions` and `content_scripts` in the manifest,
@@ -138,8 +143,10 @@ cd e2e && HTTP_ONLY=1 npm test             # same, with WebSockets blocked
 ```
 
 The e2e test maps `www.youtube.com` to a local HTTPS page with a test video,
-loads the extension into two Chrome profiles and checks play, seek, pause,
-drift correction and the "watching something else" prompt.
+loads the extension into two Chrome profiles and checks: joining mid-video
+doesn't move the host, the joiner's autoplay isn't shared, real clicks are,
+mid-video ads pause the other side, join-time ads don't, drift correction,
+and the "watching something else" prompt.
 
 ## Known limitations / next ideas
 

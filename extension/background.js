@@ -15,6 +15,7 @@ let status = "idle"; // idle | connecting | connected | reconnecting | error
 let lastError = null;
 let myId = null;
 let peers = [];
+let hostId = null;
 let lastState = null;
 let samples = [];
 let offset = 0;
@@ -115,11 +116,13 @@ function handleServer(msg) {
     case "joined":
       status = "connected";
       myId = msg.you;
+      hostId = msg.hostId || null;
       peers = msg.peers || [];
       lastState = msg.state;
       break;
     case "presence":
       peers = msg.peers || [];
+      if (msg.hostId) hostId = msg.hostId;
       break;
     case "state":
       lastState = msg;
@@ -194,7 +197,7 @@ chrome.runtime.onMessage.addListener((m, sender, sendResponse) => {
     switch (m.type) {
       case "tab-hello": {
         const isParty = Boolean(party && sender.tab && sender.tab.id === party.tabId);
-        return { active: isParty, offset, myId, peers, state: isParty && myId ? lastState : null };
+        return { active: isParty, offset, myId, hostId, peers, state: isParty && myId ? lastState : null };
       }
       case "send":
         if (party && sender.tab && sender.tab.id === party.tabId) sendRaw(m.msg);
@@ -206,6 +209,7 @@ chrome.runtime.onMessage.addListener((m, sender, sendResponse) => {
           status,
           lastError,
           myId,
+          hostId,
           peers,
           offset,
           transport: conn ? conn.kind : null,

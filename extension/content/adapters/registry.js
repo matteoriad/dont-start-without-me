@@ -8,6 +8,7 @@
 //   getMediaId()         stable id of what's playing (so we know you're watching the same thing)
 //   getMediaUrl()        a URL the partner can open to get to the same thing
 //   isReady()            false while ads/loading screens are showing
+//   isAd()               OPTIONAL. true while an ad is playing (lets the party wait for you)
 //   controls(video)      OPTIONAL. Return {play, pause, seek, getTime, isPaused, setRate}
 //                        if the site breaks when you poke <video> directly (Netflix does).
 //                        Defaults to DSWM.videoControls(video).

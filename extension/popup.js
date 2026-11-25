@@ -55,7 +55,8 @@ async function render() {
   const others = s.peers.filter((p) => p.id !== s.myId);
   for (const p of s.peers) {
     const li = document.createElement("li");
-    li.textContent = p.id === s.myId ? `${p.name} (you)` : p.name;
+    const tags = [p.id === s.myId && "you", p.id === s.hostId && "host"].filter(Boolean);
+    li.textContent = tags.length ? `${p.name} (${tags.join(", ")})` : p.name;
     list.appendChild(li);
   }
   if (s.status === "connected" && others.length === 0) {
