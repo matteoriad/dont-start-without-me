@@ -243,7 +243,9 @@
     const name = msg.fromName || "Your partner";
 
     const mine = adapter.getMediaId();
-    if (msg.mediaId && mine !== msg.mediaId) {
+    // Different thing playing (or nothing playing at all) → offer to join them.
+    // If our page is playing but can't tell what it is, assume it's the same.
+    if (msg.mediaId && mine !== msg.mediaId && (mine || !adapter.isReady())) {
       if (msg.mediaUrl && Date.now() - lastMismatchToast > MISMATCH_TOAST_EVERY_MS) {
         lastMismatchToast = Date.now();
         ui.toast(`${name} is watching something else.`, {

@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
 const ROOM_RE = /^[A-Za-z0-9-]{3,32}$/;
-const SUPPORTED_RE = /^https:\/\/(www\.|m\.)?youtube\.com\//;
+const SUPPORTED_RE = /^https:\/\/((www\.|m\.)?youtube\.com|www\.netflix\.com|tv\.apple\.com)\//;
 
 const WORDS_A = ["nile", "spree", "popcorn", "couch", "snack", "remote", "blanket", "koshary", "pretzel"];
 const WORDS_B = ["party", "night", "club", "date", "gang", "crew"];
@@ -44,7 +44,7 @@ async function render() {
     const tab = await activeTab();
     const supported = Boolean(tab && tab.url && SUPPORTED_RE.test(tab.url));
     $("start").disabled = $("join").disabled = !supported;
-    $("join-hint").textContent = supported ? "" : "Open a YouTube video in this tab first.";
+    $("join-hint").textContent = supported ? "" : "Open a YouTube, Netflix or Apple TV video in this tab first.";
     return;
   }
 

@@ -4,7 +4,7 @@ A Chrome extension for watching together, in sync, from different countries.
 Each of you streams from your own account; the extension just makes sure that
 when one of you presses play, pauses, or jumps, the other one does too.
 
-Currently supports **YouTube**. More sites are a small adapter away (see below).
+Supports **YouTube**, **Netflix** and **Apple TV** (tv.apple.com in Chrome). More sites are a small adapter away (see below).
 
 ```
  Berlin                         relay server                       Cairo
@@ -19,7 +19,7 @@ No video ever goes through the server — only small messages.
 ## How it's meant to work
 
 1. Install the extension.
-2. Open a YouTube video, click the extension, **Start a party**.
+2. Open a video on YouTube, Netflix or tv.apple.com, click the extension, **Start a party**.
 3. Send the party code to the other person. They open the same video and
    paste it under **or join theirs**.
 4. Press play. Don't start without them.
@@ -104,6 +104,9 @@ extension/
     adapters/
       registry.js        adapter interface + default <video> controls
       youtube.js         YouTube adapter
+      netflix.js         Netflix adapter (seeks via netflix-main.js)
+      netflix-main.js    runs in Netflix's page to reach its player API
+      appletv.js         Apple TV adapter (video inside shadow DOM)
 server.js                entry point (what the host runs)
 lib/relay.js             the relay (Node + ws)
 test/                    unit tests: `npm test`
@@ -130,9 +133,10 @@ with:
 Then add the site to `host_permissions` and `content_scripts` in the manifest,
 and to the supported-site check in `popup.js`.
 
-**Netflix heads-up:** setting `video.currentTime` directly triggers a playback
-error. Its adapter needs a `controls()` that talks to Netflix's own player API
-from a script injected into the page's main world.
+**Example of a tricky site:** Netflix errors out if you set
+`video.currentTime` directly, so `netflix.js` provides `controls()` that send
+seeks to `netflix-main.js`, which runs in the page's own context (manifest
+`"world": "MAIN"`) and calls Netflix's player API.
 
 ## Tests
 
@@ -140,6 +144,7 @@ from a script injected into the page's main world.
 npm test                                   # relay (both transports) + sync math
 cd e2e && npm install && npm test          # full browser test (needs Chrome, ffmpeg, openssl)
 cd e2e && HTTP_ONLY=1 npm test             # same, with WebSockets blocked
+node e2e/sites.js                          # Netflix + Apple TV adapters against mock pages
 ```
 
 The e2e test maps `www.youtube.com` to a local HTTPS page with a test video,
@@ -150,7 +155,11 @@ and the "watching something else" prompt.
 
 ## Known limitations / next ideas
 
-- Only YouTube so far.
+- Netflix and Apple TV are tested against mock pages that copy their player
+  structure, not the real sites. Ads on Netflix/Apple TV aren't detected yet
+  (YouTube only).
+- Netflix and Apple TV catalogs differ by country: both people need the title
+  available in their region.
 - Desktop Chrome/Edge only (no phones, no Fire TV — unless the laptop is on HDMI).
 - If one side buffers, the other keeps playing and the laggard catches up via
   seek. A real "wait for me" (auto-pause while someone buffers) would suit the

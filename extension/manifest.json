@@ -1,11 +1,18 @@
 {
   "manifest_version": 3,
   "name": "Don't Start Without Me",
-  "version": "0.3.0",
-  "description": "Watch together, in sync, from different countries. Currently supports YouTube.",
+  "version": "0.4.0",
+  "description": "Watch together, in sync, from different countries. YouTube, Netflix and Apple TV.",
   "minimum_chrome_version": "116",
-  "permissions": ["storage"],
-  "host_permissions": ["https://www.youtube.com/*", "https://m.youtube.com/*"],
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://m.youtube.com/*",
+    "https://www.netflix.com/*",
+    "https://tv.apple.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -26,11 +33,28 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*", "https://m.youtube.com/*"],
+      "matches": [
+        "https://www.netflix.com/*"
+      ],
+      "js": [
+        "content/adapters/netflix-main.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://www.netflix.com/*",
+        "https://tv.apple.com/*"
+      ],
       "js": [
         "content/sync-math.js",
         "content/adapters/registry.js",
         "content/adapters/youtube.js",
+        "content/adapters/netflix.js",
+        "content/adapters/appletv.js",
         "content/core.js"
       ],
       "run_at": "document_idle"

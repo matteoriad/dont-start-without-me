@@ -20,6 +20,15 @@
 
   DSWM.findAdapter = () => DSWM.adapters.find((a) => a.matches(window.location)) || null;
 
+  // querySelectorAll that also looks inside (open) shadow roots.
+  DSWM.deepQueryAll = (selector, root = document) => {
+    const out = [...root.querySelectorAll(selector)];
+    for (const el of root.querySelectorAll("*")) {
+      if (el.shadowRoot) out.push(...DSWM.deepQueryAll(selector, el.shadowRoot));
+    }
+    return out;
+  };
+
   // Default controls: talk to the HTML5 <video> element directly.
   DSWM.videoControls = (video) => ({
     play: () => video.play().catch(() => {}),
