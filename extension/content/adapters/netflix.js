@@ -23,6 +23,13 @@
     // Netflix title ids are the same in every country.
     getMediaId: () => (titleId() ? `netflix:${titleId()}` : null),
 
+    getTitle: () => {
+      // The player shows "Show  E3 Episode name" in its title bar when controls are visible.
+      const el = document.querySelector('[data-uia="video-title"]');
+      const t = el ? el.textContent.trim() : "";
+      return t || null;
+    },
+
     getMediaUrl: () => (titleId() ? `https://www.netflix.com/watch/${titleId()}` : window.location.href),
 
     isReady: () => {

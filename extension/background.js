@@ -5,6 +5,9 @@ importScripts("config.js", "content/sync-math.js", "transport.js");
 const math = self.DSWM.math;
 
 const DEFAULT_SERVER = self.DSWM_CONFIG.serverUrl;
+// Pages where the extension can sync a player. Anything else (a blank tab,
+// the invite page, …) gets navigated to the host's title after joining.
+const SUPPORTED_RE = /^https:\/\/((www\.|m\.)?youtube\.com|www\.netflix\.com|tv\.apple\.com)\//;
 const KEEPALIVE_MS = 20_000; // keeps the service worker (and a WebSocket) alive
 const CLOCK_SYNC_MS = 30_000;
 
@@ -119,6 +122,7 @@ function handleServer(msg) {
       hostId = msg.hostId || null;
       peers = msg.peers || [];
       lastState = msg.state;
+      if (msg.state) maybeFollow(msg.state);
       break;
     case "presence":
       peers = msg.peers || [];
@@ -126,6 +130,7 @@ function handleServer(msg) {
       break;
     case "state":
       lastState = msg;
+      maybeFollow(msg);
       break;
     case "error":
       lastError = msg.error;
@@ -137,15 +142,38 @@ function handleServer(msg) {
   toTab({ type: "server", msg });
 }
 
+// A joiner's tab goes to whatever the host is watching. If the tab is on a
+// supported site, its content script does that itself (it knows whether it's
+// already on the right title); otherwise we navigate the tab from here.
+async function maybeFollow(state) {
+  if (!party || !party.follow || !state.mediaUrl || state.from === myId) return;
+  party.follow = false;
+  await chrome.storage.session.set({ party });
+  let tab;
+  try {
+    tab = await chrome.tabs.get(party.tabId);
+  } catch {
+    return;
+  }
+  if (!SUPPORTED_RE.test(tab.url || "")) {
+    chrome.tabs.update(party.tabId, { url: state.mediaUrl }).catch(() => {});
+  }
+}
+
 function toTab(message) {
   if (party && party.tabId != null) chrome.tabs.sendMessage(party.tabId, message).catch(() => {});
 }
 
 // ---------------------------------------------------------------- party lifecycle
 
-async function join({ room, name, serverUrl, tabId }) {
+async function join({ room, name, serverUrl, tabId, follow }) {
+  const saved = await chrome.storage.local.get({ name: "" });
+  name = (name || saved.name || "").trim().slice(0, 40);
+  if (!name) return { ok: false, error: "Pick a name first." };
+  if (!/^[A-Za-z0-9-]{3,32}$/.test(room || "")) return { ok: false, error: "That party code doesn't look right." };
   if (party && party.tabId !== tabId) toTabId(party.tabId, { type: "party", active: false });
-  party = { room, name: name || "Someone", serverUrl: serverUrl || DEFAULT_SERVER, tabId };
+  // follow: a joiner's tab should go to whatever the host is watching.
+  party = { room, name, serverUrl: serverUrl || DEFAULT_SERVER, tabId, follow: Boolean(follow) };
   peers = [];
   lastState = null;
   await chrome.storage.session.set({ party });
@@ -155,11 +183,23 @@ async function join({ room, name, serverUrl, tabId }) {
   connect();
   let tabReady = true;
   try {
-    await chrome.tabs.sendMessage(tabId, { type: "party", active: true, offset });
+    await chrome.tabs.sendMessage(tabId, { type: "party", active: true, offset, follow: party.follow });
   } catch {
     tabReady = false; // content script not injected yet (tab opened before install)
   }
   return { ok: true, tabReady };
+}
+
+async function setName(raw) {
+  const name = String(raw || "").trim().slice(0, 40);
+  if (!name) return { ok: false, error: "Names can't be empty." };
+  await chrome.storage.local.set({ name });
+  if (party) {
+    party.name = name;
+    await chrome.storage.session.set({ party });
+    sendRaw({ type: "rename", name });
+  }
+  return { ok: true };
 }
 
 async function leave() {
@@ -197,7 +237,15 @@ chrome.runtime.onMessage.addListener((m, sender, sendResponse) => {
     switch (m.type) {
       case "tab-hello": {
         const isParty = Boolean(party && sender.tab && sender.tab.id === party.tabId);
-        return { active: isParty, offset, myId, hostId, peers, state: isParty && myId ? lastState : null };
+        return {
+          active: isParty,
+          offset,
+          myId,
+          hostId,
+          peers,
+          follow: isParty && party.follow,
+          state: isParty && myId ? lastState : null,
+        };
       }
       case "send":
         if (party && sender.tab && sender.tab.id === party.tabId) sendRaw(m.msg);
@@ -219,6 +267,12 @@ chrome.runtime.onMessage.addListener((m, sender, sendResponse) => {
       }
       case "popup-join":
         return join(m);
+      case "invite-join":
+        // From the invite page: join in that tab, then go to the host's title.
+        if (!sender.tab) return { ok: false };
+        return join({ room: m.room, name: m.name, serverUrl: m.serverUrl, tabId: sender.tab.id, follow: true });
+      case "popup-set-name":
+        return setName(m.name);
       case "popup-leave":
         await leave();
         return { ok: true };

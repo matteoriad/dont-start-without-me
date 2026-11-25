@@ -27,6 +27,8 @@
 
     getMediaId: videoId,
 
+    getTitle: () => document.title.replace(/^\(\d+\)\s*/, "").replace(/\s*-\s*YouTube\s*$/, "") || null,
+
     getMediaUrl: () => {
       const id = videoId();
       return id ? `https://www.youtube.com/watch?v=${id}` : window.location.href;

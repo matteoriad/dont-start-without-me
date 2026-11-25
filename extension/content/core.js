@@ -41,6 +41,7 @@
   let lastMismatchToast = 0;
   let synced = false; // joined and lined up with the host at least once
   let helloPending = false; // host owes a newcomer a sync
+  let followPending = false; // just joined: go to whatever the host is watching
 
   let inAd = false;
   let adAnnounced = false;
@@ -185,6 +186,7 @@
       position: controls.getTime(),
       mediaId: adapter.getMediaId(),
       mediaUrl: adapter.getMediaUrl(),
+      mediaTitle: adapter.getTitle ? adapter.getTitle() : null,
       sentAt: serverNow(),
     };
   }
@@ -246,6 +248,12 @@
     // Different thing playing (or nothing playing at all) → offer to join them.
     // If our page is playing but can't tell what it is, assume it's the same.
     if (msg.mediaId && mine !== msg.mediaId && (mine || !adapter.isReady())) {
+      if (followPending && msg.mediaUrl) {
+        // We just joined: go straight to the host's title, no questions asked.
+        followPending = false;
+        window.location.href = msg.mediaUrl;
+        return;
+      }
       if (msg.mediaUrl && Date.now() - lastMismatchToast > MISMATCH_TOAST_EVERY_MS) {
         lastMismatchToast = Date.now();
         ui.toast(`${name} is watching something else.`, {
@@ -256,6 +264,7 @@
       return;
     }
 
+    followPending = false; // we're on the right title
     if (!controls || !adapter.isReady()) {
       pendingRemote = msg; // apply once the ad / loading screen is gone
       return;
@@ -357,6 +366,9 @@
         hostId = msg.hostId || null;
         peers = msg.peers || [];
         synced = isHost();
+        // The host tells the room what's playing right away, so the invite page
+        // can show it and joiners know where to go.
+        if (isHost()) helloPending = true;
         updatePill();
         // Joiners wait for the host's "hello" rather than trusting old room state.
         break;
@@ -393,6 +405,7 @@
     pendingRemote = null;
     synced = false;
     helloPending = false;
+    followPending = false;
     adAnnounced = false;
     adPeers.clear();
     pausedForAd = false;
@@ -405,6 +418,7 @@
     if (info.myId) myId = info.myId;
     if (info.hostId) hostId = info.hostId;
     if (info.peers) peers = info.peers;
+    if (typeof info.follow === "boolean") followPending = info.follow;
     if (!active) reset();
     if (active && isHost()) synced = true;
     updatePill();

@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+const $$ = (sel) => document.querySelectorAll(sel);
 
 const ROOM_RE = /^[A-Za-z0-9-]{3,32}$/;
 const SUPPORTED_RE = /^https:\/\/((www\.|m\.)?youtube\.com|www\.netflix\.com|tv\.apple\.com)\//;
@@ -11,6 +12,13 @@ function randomRoom() {
   return `${pick(WORDS_A)}-${pick(WORDS_B)}-${Math.floor(10 + Math.random() * 90)}`;
 }
 
+// People paste whole invite links into the code box too.
+function codeFrom(input) {
+  const s = input.trim();
+  const m = s.match(/\/join\/([A-Za-z0-9-]{3,32})/);
+  return (m ? m[1] : s).toLowerCase();
+}
+
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -18,6 +26,8 @@ async function activeTab() {
 
 let filledForm = false;
 let localError = "";
+let renaming = false;
+let last = null;
 
 function statusText(s) {
   if (s.status === "connected") return "Connected.";
@@ -27,39 +37,53 @@ function statusText(s) {
   return "Not connected.";
 }
 
+function inviteUrl(s) {
+  const base = (s.party && s.party.serverUrl) || s.defaultServer;
+  return new URL(`/join/${s.party.room}`, base).toString();
+}
+
+function showOnly(id) {
+  for (const v of ["name-view", "join-view", "party-view", "rename-view"]) $(v).hidden = v !== id;
+}
+
 async function render() {
   const s = await chrome.runtime.sendMessage({ type: "popup-get" });
-  const inParty = Boolean(s.party);
-  $("join-view").hidden = inParty;
-  $("party-view").hidden = !inParty;
+  last = s;
   $("error").textContent = localError || s.lastError || "";
+  $$(".my-name").forEach((el) => (el.textContent = s.saved.name));
 
-  if (!inParty) {
+  if (renaming) return showOnly("rename-view");
+  if (!s.saved.name) {
+    showOnly("name-view");
+    return;
+  }
+
+  if (!s.party) {
+    showOnly("join-view");
     if (!filledForm) {
-      $("name").value = s.saved.name;
       $("server").value = s.saved.serverUrl;
       $("server").placeholder = s.defaultServer;
       filledForm = true;
     }
     const tab = await activeTab();
-    const supported = Boolean(tab && tab.url && SUPPORTED_RE.test(tab.url));
-    $("start").disabled = $("join").disabled = !supported;
-    $("join-hint").textContent = supported ? "" : "Open a YouTube, Netflix or Apple TV video in this tab first.";
+    const onVideoSite = Boolean(tab && tab.url && SUPPORTED_RE.test(tab.url));
+    $("start").disabled = !onVideoSite;
+    $("start-hint").textContent = onVideoSite ? "" : "To start one, open YouTube, Netflix or Apple TV in this tab.";
     return;
   }
 
+  showOnly("party-view");
   $("room-code").textContent = s.party.room;
   $("status").textContent = statusText(s);
   const list = $("peers");
   list.replaceChildren();
-  const others = s.peers.filter((p) => p.id !== s.myId);
   for (const p of s.peers) {
     const li = document.createElement("li");
     const tags = [p.id === s.myId && "you", p.id === s.hostId && "host"].filter(Boolean);
     li.textContent = tags.length ? `${p.name} (${tags.join(", ")})` : p.name;
     list.appendChild(li);
   }
-  if (s.status === "connected" && others.length === 0) {
+  if (s.status === "connected" && !s.peers.some((p) => p.id !== s.myId)) {
     const li = document.createElement("li");
     li.className = "muted";
     li.textContent = "Waiting for them to join…";
@@ -67,7 +91,7 @@ async function render() {
   }
 }
 
-async function joinRoom(room) {
+async function joinRoom(room, { start }) {
   localError = "";
   if (!ROOM_RE.test(room)) {
     localError = "Party codes are 3–32 letters, numbers or dashes.";
@@ -78,16 +102,56 @@ async function joinRoom(room) {
   const res = await chrome.runtime.sendMessage({
     type: "popup-join",
     room,
-    name: $("name").value.trim(),
     serverUrl: $("server").value.trim(),
     tabId: tab.id,
+    follow: !start, // joiners go to whatever the host is watching
   });
-  if (res && !res.tabReady) localError = "Reload this tab once so the extension can hook into the player.";
+  if (res && res.ok === false) localError = res.error;
+  else if (res && !res.tabReady && start) localError = "Reload this tab once so the extension can hook into the player.";
   render();
 }
 
-$("start").addEventListener("click", () => joinRoom(randomRoom()));
-$("join").addEventListener("click", () => joinRoom($("room").value.trim().toLowerCase()));
+async function saveName(value) {
+  const res = await chrome.runtime.sendMessage({ type: "popup-set-name", name: value });
+  if (!res.ok) {
+    localError = res.error;
+    $("error").textContent = localError;
+    return false;
+  }
+  localError = "";
+  return true;
+}
+
+// first run
+$("save-first-name").addEventListener("click", async () => {
+  if (await saveName($("first-name").value)) render();
+});
+$("first-name").addEventListener("keydown", (e) => e.key === "Enter" && $("save-first-name").click());
+
+// rename
+$$(".edit-name").forEach((b) =>
+  b.addEventListener("click", () => {
+    renaming = true;
+    $("rename").value = last ? last.saved.name : "";
+    render().then(() => $("rename").select());
+  }),
+);
+$("save-rename").addEventListener("click", async () => {
+  if (await saveName($("rename").value)) {
+    renaming = false;
+    render();
+  }
+});
+$("rename").addEventListener("keydown", (e) => e.key === "Enter" && $("save-rename").click());
+$("cancel-rename").addEventListener("click", () => {
+  renaming = false;
+  localError = "";
+  render();
+});
+
+// start / join
+$("start").addEventListener("click", () => joinRoom(randomRoom(), { start: true }));
+$("join").addEventListener("click", () => joinRoom(codeFrom($("room").value), { start: false }));
 $("room").addEventListener("keydown", (e) => e.key === "Enter" && $("join").click());
 
 $("leave").addEventListener("click", async () => {
@@ -97,11 +161,16 @@ $("leave").addEventListener("click", async () => {
   render();
 });
 
-$("copy").addEventListener("click", async () => {
-  await navigator.clipboard.writeText($("room-code").textContent);
-  $("copy").textContent = "Copied";
-  setTimeout(() => ($("copy").textContent = "Copy"), 1200);
+$("copy-invite").addEventListener("click", async () => {
+  if (!last || !last.party) return;
+  await navigator.clipboard.writeText(inviteUrl(last));
+  $("copy-invite").textContent = "Copied! Send it over";
+  setTimeout(() => ($("copy-invite").textContent = "Copy invite link"), 1600);
 });
 
-render();
-setInterval(render, 1000);
+render().then(() => {
+  if (!$("name-view").hidden) $("first-name").focus();
+});
+setInterval(() => {
+  if (!renaming) render();
+}, 1000);

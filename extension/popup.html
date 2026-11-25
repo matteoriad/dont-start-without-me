@@ -10,21 +10,27 @@
       <p class="tagline">Same scene, different countries.</p>
     </header>
 
-    <section id="join-view" hidden>
+    <!-- First run: a name is required -->
+    <section id="name-view" hidden>
       <label>
-        Your name
-        <input id="name" maxlength="40" placeholder="So they know who paused" />
+        What should we call you?
+        <input id="first-name" maxlength="40" placeholder="So they know who paused" />
       </label>
+      <button id="save-first-name" class="primary">Continue</button>
+    </section>
+
+    <section id="join-view" hidden>
+      <p class="me">Hi, <b class="my-name"></b> · <button class="link edit-name">edit</button></p>
 
       <button id="start" class="primary">Start a party</button>
+      <p id="start-hint" class="hint"></p>
 
       <p class="or">or join theirs</p>
       <div class="row">
-        <input id="room" maxlength="32" placeholder="Their party code" />
+        <input id="room" maxlength="32" placeholder="Party code" />
         <button id="join">Join</button>
       </div>
-
-      <p id="join-hint" class="hint"></p>
+      <p class="hint">Works from any tab. We'll open what they're watching.</p>
 
       <details>
         <summary>Advanced</summary>
@@ -36,14 +42,24 @@
     </section>
 
     <section id="party-view" hidden>
-      <p class="label">Party code — send it to them</p>
-      <div class="room">
-        <code id="room-code"></code>
-        <button id="copy" title="Copy party code">Copy</button>
-      </div>
+      <button id="copy-invite" class="primary">Copy invite link</button>
+      <p class="label">or tell them the code: <code id="room-code"></code></p>
       <p id="status"></p>
       <ul id="peers"></ul>
+      <p class="me">You're <b class="my-name"></b> · <button class="link edit-name">edit</button></p>
       <button id="leave">Leave party</button>
+    </section>
+
+    <!-- Rename, available everywhere -->
+    <section id="rename-view" hidden>
+      <label>
+        Your name
+        <input id="rename" maxlength="40" />
+      </label>
+      <div class="row">
+        <button id="save-rename" class="primary">Save</button>
+        <button id="cancel-rename">Cancel</button>
+      </div>
     </section>
 
     <p id="error" class="error"></p>

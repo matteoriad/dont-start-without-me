@@ -35,6 +35,8 @@
 
     getMediaUrl: () => window.location.href,
 
+    getTitle: () => document.title.replace(/\s*[-–|]\s*Apple TV.*$/i, "").trim() || null,
+
     isReady: () => {
       const v = findVideo();
       return Boolean(v) && v.readyState > 0 && v.duration > 0;

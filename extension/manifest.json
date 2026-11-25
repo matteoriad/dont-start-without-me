@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Don't Start Without Me",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Watch together, in sync, from different countries. YouTube, Netflix and Apple TV.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -56,6 +56,16 @@
         "content/adapters/netflix.js",
         "content/adapters/appletv.js",
         "content/core.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://celestial-darkgreen-hyena-82.hostingersite.com/join/*",
+        "http://localhost/join/*"
+      ],
+      "js": [
+        "content/invite.js"
       ],
       "run_at": "document_idle"
     }

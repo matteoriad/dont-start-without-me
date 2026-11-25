@@ -18,11 +18,15 @@ No video ever goes through the server — only small messages.
 
 ## How it's meant to work
 
-1. Install the extension.
-2. Open a video on YouTube, Netflix or tv.apple.com, click the extension, **Start a party**.
-3. Send the party code to the other person. They open the same video and
-   paste it under **or join theirs**.
-4. Press play. Don't start without them.
+1. Install the extension. The first time you open it, it asks for your name
+   (you can change it any time, even mid-party).
+2. Open a video on YouTube, Netflix or tv.apple.com, click the extension,
+   **Start a party**, then **Copy invite link**.
+3. Send the link. Your partner opens it and lands on a little invite page
+   ("Matteo saved you a seat", what's playing, live position). One click on
+   **Take your seat** and their tab opens your video, already in sync.
+4. Or the old-school way: they type the party code into the extension from
+   any tab, and it opens what you're watching.
 
 The relay server is built into the extension (`extension/config.js`), so
 nobody ever has to type a server address.
@@ -51,7 +55,8 @@ npx pm2 start server.js --name dswm && npx pm2 save   # keeps it running
 
 Open port 8787 in the firewall. The address is then `http://<server-ip>:8787`.
 
-**Then:** put that address in `extension/config.js` and reload the extension.
+**Then:** put that address in `extension/config.js`, and the same domain in
+`manifest.json` (the `content/invite.js` match), and reload the extension.
 
 Check it's alive by opening the address in a browser: it says
 `ok — don't start without me`.
@@ -97,7 +102,8 @@ extension/
   config.js              the built-in relay address
   transport.js           WebSocket, or HTTP long-polling fallback
   background.js          connection to the relay, room, clock offset
-  popup.html/.css/.js    start / join / leave UI
+  popup.html/.css/.js    name, start / join / leave, invite link
+  content/invite.js      talks to the invite page (join with one click)
   content/
     sync-math.js         pure functions: drift, clock offset (unit-tested)
     core.js              the sync engine (site-agnostic)
@@ -108,6 +114,7 @@ extension/
       netflix-main.js    runs in Netflix's page to reach its player API
       appletv.js         Apple TV adapter (video inside shadow DOM)
 server.js                entry point (what the host runs)
+public/join.html         the invite page served at /join/<code>
 lib/relay.js             the relay (Node + ws)
 test/                    unit tests: `npm test`
 e2e/
@@ -145,6 +152,7 @@ npm test                                   # relay (both transports) + sync math
 cd e2e && npm install && npm test          # full browser test (needs Chrome, ffmpeg, openssl)
 cd e2e && HTTP_ONLY=1 npm test             # same, with WebSockets blocked
 node e2e/sites.js                          # Netflix + Apple TV adapters against mock pages
+node e2e/invite.js                         # names, invite page, joining from any tab
 ```
 
 The e2e test maps `www.youtube.com` to a local HTTPS page with a test video,

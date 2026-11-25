@@ -133,3 +133,33 @@ button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
+.me {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.me b {
+  color: var(--fg);
+}
+button.link {
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.label code {
+  color: var(--fg);
+  font-size: 13px;
+}
+#party-view .primary {
+  margin: 0 0 10px;
+}
+#status {
+  margin: 10px 0 0;
+}
+#rename-view .row button {
+  flex: 1;
+  margin-top: 6px;
+}

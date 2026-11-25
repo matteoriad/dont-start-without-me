@@ -7,6 +7,7 @@
 //   getVideo()           the <video> element to sync, or null
 //   getMediaId()         stable id of what's playing (so we know you're watching the same thing)
 //   getMediaUrl()        a URL the partner can open to get to the same thing
+//   getTitle()           OPTIONAL. human title for the invite page ("Inception")
 //   isReady()            false while ads/loading screens are showing
 //   isAd()               OPTIONAL. true while an ad is playing (lets the party wait for you)
 //   controls(video)      OPTIONAL. Return {play, pause, seek, getTime, isPaused, setRate}

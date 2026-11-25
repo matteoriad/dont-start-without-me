@@ -179,3 +179,43 @@ test("relay: host is the room opener, passes on when they leave; ad messages rel
     await relay.close();
   }
 });
+
+test("relay: invite page, room info and rename", async () => {
+  const relay = createRelay({ port: 0, log: () => {} });
+  const port = await relay.listen();
+  try {
+    const page = await fetch(`http://127.0.0.1:${port}/join/movie-night-1`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /Admit two/);
+
+    const none = await (await fetch(`http://127.0.0.1:${port}/api/room/movie-night-1`)).json();
+    assert.equal(none.exists, false);
+
+    const a = client(port);
+    const b = client(port);
+    await Promise.all([a.open(), b.open()]);
+    a.send({ type: "join", room: "movie-night-1", name: "Matteo" });
+    await a.next("joined");
+    a.send({ type: "state", reason: "hello", playing: false, position: 75, mediaUrl: "https://www.netflix.com/watch/1", mediaTitle: "Dark", sentAt: Date.now() });
+    await new Promise((r) => setTimeout(r, 50));
+    const info = await (await fetch(`http://127.0.0.1:${port}/api/room/movie-night-1`)).json();
+    assert.equal(info.hostName, "Matteo");
+    assert.equal(info.service, "Netflix");
+    assert.equal(info.title, "Dark");
+    assert.equal(info.position, 75);
+    assert.equal(info.playing, false);
+
+    b.send({ type: "join", room: "movie-night-1", name: "Y" });
+    await b.next("joined");
+    await a.next("presence");
+    b.send({ type: "rename", name: "Yasso" });
+    const ren = await a.next("presence");
+    assert.equal(ren.event, "renamed");
+    assert.ok(ren.peers.some((p) => p.name === "Yasso"));
+
+    a.ws.close();
+    b.ws.close();
+  } finally {
+    await relay.close();
+  }
+});
